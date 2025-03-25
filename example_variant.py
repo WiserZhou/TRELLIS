@@ -15,7 +15,7 @@ pipeline = TrellisTextTo3DPipeline.from_pretrained("JeffreyXiang/TRELLIS-text-xl
 pipeline.cuda()
 
 # Load mesh to make variants
-base_mesh = o3d.io.read_triangle_mesh("assets/monkey.ply")
+base_mesh = o3d.io.read_triangle_mesh("assets/T.ply")
 
 # Run the pipeline
 outputs = pipeline.run_variant(
