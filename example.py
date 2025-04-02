@@ -4,54 +4,39 @@ os.environ['SPCONV_ALGO'] = 'native'        # Can be 'native' or 'auto', default
                                             # 'auto' is faster but will do benchmarking at the beginning.
                                             # Recommended to set to 'native' if run only once.
 
-import imageio
 from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
-from trellis.utils import render_utils, postprocessing_utils
+from process_utils import save_outputs, load_render_info
 
 # Load a pipeline from a model folder or a Hugging Face model hub.
 pipeline = TrellisImageTo3DPipeline.from_pretrained("JeffreyXiang/TRELLIS-image-large")
 pipeline.cuda()
 
-# Load an image
-image = Image.open("assets/example_image/T.png")
+parts_info, while_model_paths = load_render_info("/mnt/pfs/users/yangyunhan/yufan/VRenderer/render_info.json")
 
-# Run the pipeline
-outputs = pipeline.run(
-    image,
-    seed=1,
-    # Optional parameters
-    # sparse_structure_sampler_params={
-    #     "steps": 12,
-    #     "cfg_strength": 7.5,
-    # },
-    # slat_sampler_params={
-    #     "steps": 12,
-    #     "cfg_strength": 3,
-    # },
-)
-# outputs is a dictionary containing generated 3D assets in different formats:
-# - outputs['gaussian']: a list of 3D Gaussians
-# - outputs['radiance_field']: a list of radiance fields
-# - outputs['mesh']: a list of meshes
+image_part_list = []
 
-# Render the outputs
-video = render_utils.render_video(outputs['gaussian'][0])['color']
-imageio.mimsave("sample_gs.mp4", video, fps=30)
-video = render_utils.render_video(outputs['radiance_field'][0])['color']
-imageio.mimsave("sample_rf.mp4", video, fps=30)
-video = render_utils.render_video(outputs['mesh'][0])['normal']
-imageio.mimsave("sample_mesh.mp4", video, fps=30)
+for part_name, image_paths in parts_info.items():
+    image_part_list.append(Image.open(image_paths[0])) # front part image
 
-# GLB files can be extracted from the outputs
-glb = postprocessing_utils.to_glb(
-    outputs['gaussian'][0],
-    outputs['mesh'][0],
-    # Optional parameters
-    simplify=0.95,          # Ratio of triangles to remove in the simplification process
-    texture_size=1024,      # Size of the texture used for the GLB
-)
-glb.export("sample.glb")
+# image = Image.open("./assets/example_image/T.png") # image to be rendered
 
-# Save Gaussians as PLY files
-outputs['gaussian'][0].save_ply("sample.ply")
+num_images = len(image_part_list)
+
+for i in range(num_images):
+    # Run the pipeline
+    outputs = pipeline.run(
+        image_part_list[:i+1],
+        seed=1,
+        # Optional parameters
+        # sparse_structure_sampler_params={
+        #     "steps": 12,
+        #     "cfg_strength": 7.5,
+        # },
+        # slat_sampler_params={
+        #     "steps": 12,
+        #     "cfg_strength": 3,
+        # },
+    )
+
+    save_outputs(outputs, filename_prefix=f"sample_image_{i+1}", save_video=True, save_glb=False)

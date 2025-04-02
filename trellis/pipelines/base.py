@@ -10,7 +10,7 @@ class Pipeline:
     """
     def __init__(
         self,
-        models: dict[str, nn.Module] = None,
+        models: Dict[str, nn.Module] = None,
     ):
         if models is None:
             return

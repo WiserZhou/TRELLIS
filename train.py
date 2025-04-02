@@ -93,6 +93,10 @@ def main(local_rank, cfg):
         else:
             trainer.run()
 
+# python train.py \
+#   --config configs/vae/slat_vae_dec_mesh_swin8_B_64l8_fp16.json \
+#   --output_dir outputs/slat_vae_dec_mesh_swin8_B_64l8_fp16_1node \
+#   --data_dir /path/to/your/dataset1,/path/to/your/dataset2 \
 
 if __name__ == '__main__':
     # Arguments and config

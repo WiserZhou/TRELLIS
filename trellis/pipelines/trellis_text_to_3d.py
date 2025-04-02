@@ -22,7 +22,7 @@ class TrellisTextTo3DPipeline(Pipeline):
     """
     def __init__(
         self,
-        models: dict[str, nn.Module] = None,
+        models: Dict[str, nn.Module] = None,
         sparse_structure_sampler: samplers.Sampler = None,
         slat_sampler: samplers.Sampler = None,
         slat_normalization: dict = None,
