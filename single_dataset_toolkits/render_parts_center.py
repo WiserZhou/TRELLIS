@@ -279,7 +279,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Define paths for model storage and processing
-    model_root = "/mnt/pfs/users/yangyunhan/yufan/data"  # Root directory for storing 3D models
+    model_root = "/mnt/pfs/users/yangyunhan/yufan/data/raw"  # Root directory for storing 3D models
     
     # Download the 3D model from Objaverse using the provided ID
     uid = args.o
