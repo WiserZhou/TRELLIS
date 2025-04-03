@@ -26,7 +26,7 @@ def voxelize_glb(input_file, output_file, resolution=64):
     print(f"Processing {input_file}...")
     
     # Load the GLB file using trimesh
-    mesh_trimesh = trimesh.load(input_file)
+    mesh_trimesh = trimesh.load(input_file, force='mesh')
     
     # Convert to Open3D mesh
     vertices = np.array(mesh_trimesh.vertices)
@@ -38,8 +38,13 @@ def voxelize_glb(input_file, output_file, resolution=64):
     mesh.triangles = o3d.utility.Vector3iVector(faces)
     
     # Normalize mesh to centered [-0.5, 0.5] cube
-    mesh.scale(1 / max(mesh.get_max_bound() - mesh.get_min_bound()), center=True)
+    # Calculate center before scaling
     center = (mesh.get_max_bound() + mesh.get_min_bound()) / 2
+    # Get scale factor
+    scale_factor = 1 / max(mesh.get_max_bound() - mesh.get_min_bound())
+    # Apply scaling with the center as a numpy array
+    mesh.scale(scale_factor, center=np.asarray(center))
+    # Translate to origin
     mesh.translate(-center)
     
     # Clamp vertices to ensure they're within bounds
@@ -77,17 +82,23 @@ def voxelize_glb(input_file, output_file, resolution=64):
         'resolution': resolution
     }
 
+# python dataset_toolkits_for_single/voxelize.py --input /mnt/pfs/users/yangyunhan/yufan/data/raw/ab9804f981184f8db6f1f814c2b8c169.glb
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Voxelize a GLB file into a PLY voxel representation')
     parser.add_argument('--input', type=str, required=True, help='Path to input GLB file')
-    parser.add_argument('--output', type=str, required=True, help='Path to output PLY file')
+    parser.add_argument('--output', type=str, default="/mnt/pfs/users/yangyunhan/yufan/data/voxel/", help='Directory to save output PLY file')
     parser.add_argument('--resolution', type=int, default=64, help='Voxel grid resolution (default: 64)')
     
     args = parser.parse_args()
     
     # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    os.makedirs(args.output, exist_ok=True)
+    
+    # Generate output filename based on input filename
+    input_basename = os.path.basename(args.input)
+    output_filename = os.path.splitext(input_basename)[0] + '.ply'
+    output_path = os.path.join(args.output, output_filename)
     
     # Process the GLB file
-    result = voxelize_glb(args.input, args.output, args.resolution)
+    result = voxelize_glb(args.input, output_path, args.resolution)
