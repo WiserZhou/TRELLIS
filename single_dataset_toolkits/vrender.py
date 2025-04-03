@@ -186,17 +186,17 @@ def process(model_path, save_dir):
     }
     
     # Save render information to a JSON file
-    json_path = os.path.join("/mnt/pfs/users/yangyunhan/yufan/data/render_part_images", "render_info.json")
+    json_path = os.path.join("/mnt/pfs/users/yangyunhan/yufan/data/render_images", "render_info.json")
     with open(json_path, 'w') as f:
         json.dump(render_info, f, indent=2)
 
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser()
-    parser.add_argument("-o", type=str, default="ab9804f981184f8db6f1f814c2b8c169_2", 
+    parser.add_argument("-o", type=str, default="ab9804f981184f8db6f1f814c2b8c169", 
                         help="Object ID from Objaverse dataset")
     args = parser.parse_args()
-
+ 
     # Define paths for model storage and processing
     model_root = "/mnt/pfs/users/yangyunhan/yufan/data/raw"  # Root directory for storing 3D models
     
