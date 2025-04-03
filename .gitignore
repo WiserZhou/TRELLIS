@@ -400,3 +400,4 @@ FodyWeavers.xsd
 datasets/
 z_output/
 __pycache__
+*.zip
