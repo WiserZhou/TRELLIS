@@ -45,6 +45,9 @@ def render_model(file_path, output_dir, num_views=150, resolution=512):
     """
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
+
+    num_views = 150 if num_views is None else num_views
+    resolution = 512 if resolution is None else resolution
     
     # Generate camera positions using Hammersley sequence for uniform distribution on sphere
     yaws = []
