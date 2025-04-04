@@ -78,10 +78,11 @@ def main(local_rank, cfg):
 
     # Seed random number generators for reproducibility
     setup_rng(rank)
-
+    print("Load training dataset ...")
     # Load dataset based on configuration
     dataset = getattr(datasets, cfg.dataset.name)(cfg.data_dir, **cfg.dataset.args)
 
+    print("Load model ...")
     # Build models dynamically based on configuration
     model_dict = {
         name: getattr(models, model.name)(**model.args).cuda()
@@ -96,6 +97,7 @@ def main(local_rank, cfg):
             with open(os.path.join(cfg.output_dir, f'{name}_model_summary.txt'), 'w') as fp:
                 print(model_summary, file=fp)
 
+    print("Load trainer ...")
     # Initialize trainer with models, dataset and configuration
     trainer = getattr(trainers, cfg.trainer.name)(model_dict, dataset, **cfg.trainer.args, output_dir=cfg.output_dir, load_dir=cfg.load_dir, step=cfg.load_ckpt)
 
@@ -105,12 +107,6 @@ def main(local_rank, cfg):
             trainer.profile()
         else:
             trainer.run()
-
-# Example command:
-# python train.py \
-#   --config configs/vae/slat_vae_dec_mesh_swin8_B_64l8_fp16.json \
-#   --output_dir outputs/slat_vae_dec_mesh_swin8_B_64l8_fp16_1node \
-#   --data_dir /path/to/your/dataset1,/path/to/your/dataset2 \
 
 if __name__ == '__main__':
     # Parse command line arguments and load configuration

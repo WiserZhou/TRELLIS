@@ -142,7 +142,7 @@ class ResumableSampler(Sampler):
     def __len__(self) -> int:
         return self.num_samples
 
-    def state_dict(self) -> dict[str, int]:
+    def state_dict(self) -> Dict[str, int]:
         return {
             'epoch': self.epoch,
             'idx': self.idx,

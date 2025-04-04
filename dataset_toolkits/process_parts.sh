@@ -25,3 +25,7 @@ python dataset_toolkits/build_metadata.py Parts --output_dir datasets/Parts
 python3 dataset_toolkits/render_cond.py Parts --output_dir datasets/Parts
 
 python dataset_toolkits/build_metadata.py Parts --output_dir datasets/Parts
+
+
+# render pip
+pip install pillow bpy pandas numpy trimesh easydict tqdm

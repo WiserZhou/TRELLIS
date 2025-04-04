@@ -1,3 +1,19 @@
+"""
+Base Trainer Module for TRELLIS Framework
+
+This file contains the abstract base class for training machine learning models in the TRELLIS framework.
+The Trainer class provides a comprehensive foundation for training workflows with support for:
+- Single and multi-GPU training via PyTorch Distributed Data Parallel (DDP)
+- Checkpointing for saving and resuming training
+- TensorBoard logging and visualization
+- Mixed precision training
+- Exponential Moving Average (EMA) of model parameters
+- Efficient data loading with prefetching
+- Customizable sampling and visualization of model outputs
+
+Subclasses must implement several abstract methods to define model-specific training logic.
+"""
+
 from abc import abstractmethod
 import os
 import time
@@ -19,6 +35,11 @@ from ..utils.data_utils import recursive_to_device, cycle, ResumableSampler
 class Trainer:
     """
     Base class for training.
+    
+    This abstract class defines the core training loop and utilities
+    that are common across different training tasks. Specific training
+    implementations should inherit from this class and implement the
+    abstract methods.
     """
     def __init__(self,
         models,
@@ -48,6 +69,35 @@ class Trainer:
         i_ddpcheck=10000,
         **kwargs
     ):
+        """
+        Initialize the trainer with models, dataset, and training configuration.
+        
+        Args:
+            models: Dictionary of models to train
+            dataset: Dataset to train on
+            output_dir: Directory to save outputs
+            load_dir: Directory to load checkpoints from
+            step: Current training step (for resuming)
+            max_steps: Maximum number of training steps
+            batch_size: Global batch size across all GPUs
+            batch_size_per_gpu: Batch size per GPU (alternative to batch_size)
+            batch_split: Number of microbatches to split each batch into
+            optimizer: Dictionary of optimizer configurations
+            lr_scheduler: Learning rate scheduler configuration
+            elastic: Configuration for elastic training
+            grad_clip: Value for gradient clipping
+            ema_rate: Rate for exponential moving average
+            fp16_mode: Mode for mixed precision training ('inflat_all' or 'amp')
+            fp16_scale_growth: Growth rate for mixed precision scaling
+            finetune_ckpt: Checkpoint path for fine-tuning
+            log_param_stats: Whether to log parameter statistics
+            prefetch_data: Whether to prefetch data to GPU
+            i_print: Interval for printing progress
+            i_log: Interval for logging metrics
+            i_sample: Interval for sampling/visualization
+            i_save: Interval for saving checkpoints
+            i_ddpcheck: Interval for checking DDP consistency
+        """
         assert batch_size is not None or batch_size_per_gpu is not None, 'Either batch_size or batch_size_per_gpu must be specified.'
 
         self.models = models
@@ -73,6 +123,7 @@ class Trainer:
         self.i_save = i_save
         self.i_ddpcheck = i_ddpcheck        
 
+        # Set up distributed training configuration
         if dist.is_initialized():
             # Multi-GPU params
             self.world_size = dist.get_world_size()
@@ -86,26 +137,30 @@ class Trainer:
             self.local_rank = 0
             self.is_master = True
 
+        # Calculate batch size parameters
         self.batch_size = batch_size if batch_size_per_gpu is None else batch_size_per_gpu * self.world_size
         self.batch_size_per_gpu = batch_size_per_gpu if batch_size_per_gpu is not None else batch_size // self.world_size
         assert self.batch_size % self.world_size == 0, 'Batch size must be divisible by the number of GPUs.'
         assert self.batch_size_per_gpu % self.batch_split == 0, 'Batch size per GPU must be divisible by batch split.'
 
+        # Initialize models, optimizers, etc.
         self.init_models_and_more(**kwargs)
         self.prepare_dataloader(**kwargs)
         
-        # Load checkpoint
+        # Load checkpoint or initialize from scratch
         self.step = 0
         if load_dir is not None and step is not None:
             self.load(load_dir, step)
         elif finetune_ckpt is not None:
             self.finetune_from(finetune_ckpt)
         
+        # Set up output directories and tensorboard writer on master process
         if self.is_master:
             os.makedirs(os.path.join(self.output_dir, 'ckpts'), exist_ok=True)
             os.makedirs(os.path.join(self.output_dir, 'samples'), exist_ok=True)
             self.writer = SummaryWriter(os.path.join(self.output_dir, 'tb_logs'))
 
+        # Check DDP setup for multi-GPU training
         if self.world_size > 1:
             self.check_ddp()
             
@@ -115,6 +170,12 @@ class Trainer:
             
     @property
     def device(self):
+        """
+        Get the device that the models are on.
+        
+        Returns:
+            torch.device: The device of the first model parameter found.
+        """
         for _, model in self.models.items():
             if hasattr(model, 'device'):
                 return model.device
@@ -123,13 +184,19 @@ class Trainer:
     @abstractmethod
     def init_models_and_more(self, **kwargs):
         """
-        Initialize models and more.
+        Initialize models and other components like optimizers, schedulers, etc.
+        
+        This abstract method must be implemented by subclasses to set up the
+        specific models and related components needed for training.
         """
         pass
     
     def prepare_dataloader(self, **kwargs):
         """
-        Prepare dataloader.
+        Prepare dataloader for training.
+        
+        Sets up the data sampler and dataloader with appropriate batch size,
+        workers, and other configurations for efficient data loading.
         """
         self.data_sampler = ResumableSampler(
             self.dataset,
@@ -151,7 +218,15 @@ class Trainer:
     def load(self, load_dir, step=0):
         """
         Load a checkpoint.
-        Should be called by all processes.
+        
+        This method should be implemented to restore the training state
+        from a saved checkpoint.
+        
+        Args:
+            load_dir: Directory containing checkpoints
+            step: Specific step to load, or 0 for latest
+            
+        Note: Should be called by all processes in distributed training.
         """
         pass
 
@@ -159,7 +234,11 @@ class Trainer:
     def save(self):
         """
         Save a checkpoint.
-        Should be called only by the rank 0 process.
+        
+        This method should be implemented to save the current training state
+        to a checkpoint file.
+        
+        Note: Should be called only by the rank 0 process in distributed training.
         """
         pass
     
@@ -167,7 +246,14 @@ class Trainer:
     def finetune_from(self, finetune_ckpt):
         """
         Finetune from a checkpoint.
-        Should be called by all processes.
+        
+        This method should be implemented to load pre-trained weights
+        for fine-tuning.
+        
+        Args:
+            finetune_ckpt: Path to checkpoint for fine-tuning
+            
+        Note: Should be called by all processes in distributed training.
         """
         pass
     
@@ -175,13 +261,31 @@ class Trainer:
     def run_snapshot(self, num_samples, batch_size=4, verbose=False, **kwargs):
         """
         Run a snapshot of the model.
+        
+        This method should be implemented to generate samples from the model
+        for visualization.
+        
+        Args:
+            num_samples: Number of samples to generate
+            batch_size: Batch size for generation
+            verbose: Whether to print verbose information
+            **kwargs: Additional arguments
+            
+        Returns:
+            dict: Dictionary of generated samples
         """
         pass
 
     @torch.no_grad()
     def visualize_sample(self, sample):
         """
-        Convert a sample to an image.
+        Convert a sample to an image for visualization.
+        
+        Args:
+            sample: Data sample to visualize
+            
+        Returns:
+            torch.Tensor or dict: Processed sample ready for visualization
         """
         if hasattr(self.dataset, 'visualize_sample'):
             return self.dataset.visualize_sample(sample)
@@ -191,7 +295,12 @@ class Trainer:
     @torch.no_grad()
     def snapshot_dataset(self, num_samples=100):
         """
-        Sample images from the dataset.
+        Sample images from the dataset for visualization.
+        
+        Creates a visualization of dataset samples and saves them to disk.
+        
+        Args:
+            num_samples: Number of samples to visualize
         """
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
@@ -219,8 +328,18 @@ class Trainer:
     @torch.no_grad()
     def snapshot(self, suffix=None, num_samples=64, batch_size=4, verbose=False):
         """
-        Sample images from the model.
-        NOTE: This function should be called by all processes.
+        Sample images from the model and save to disk.
+        
+        This function coordinates the generation of samples across all processes
+        and gathers them on the master process for saving.
+        
+        Args:
+            suffix: Suffix for the output directory name
+            num_samples: Number of samples to generate
+            batch_size: Batch size for generation
+            verbose: Whether to print verbose information
+            
+        Note: This function should be called by all processes in distributed training.
         """
         if self.is_master:
             print(f'\nSampling {num_samples} images...', end='')
@@ -228,11 +347,11 @@ class Trainer:
         if suffix is None:
             suffix = f'step{self.step:07d}'
 
-        # Assign tasks
+        # Assign tasks to processes for parallel generation
         num_samples_per_process = int(np.ceil(num_samples / self.world_size))
         samples = self.run_snapshot(num_samples_per_process, batch_size=batch_size, verbose=verbose)
 
-        # Preprocess images
+        # Preprocess images for visualization
         for key in list(samples.keys()):
             if samples[key]['type'] == 'sample':
                 vis = self.visualize_sample(samples[key]['value'])
@@ -243,7 +362,7 @@ class Trainer:
                 else:
                     samples[key] = {'value': vis, 'type': 'image'}
 
-        # Gather results
+        # Gather results from all processes
         if self.world_size > 1:
             for key in samples.keys():
                 samples[key]['value'] = samples[key]['value'].contiguous()
@@ -255,7 +374,7 @@ class Trainer:
                 if self.is_master:
                     samples[key]['value'] = torch.cat(all_images, dim=0)[:num_samples]
 
-        # Save images
+        # Save images to disk (master process only)
         if self.is_master:
             os.makedirs(os.path.join(self.output_dir, 'samples', suffix), exist_ok=True)
             for key in samples.keys():
@@ -288,29 +407,52 @@ class Trainer:
     @abstractmethod
     def update_ema(self):
         """
-        Update exponential moving average.
-        Should only be called by the rank 0 process.
+        Update exponential moving average of model parameters.
+        
+        This method should be implemented to maintain EMA versions of models
+        for more stable inference.
+        
+        Note: Should only be called by the rank 0 process.
         """
         pass
 
     @abstractmethod
     def check_ddp(self):
         """
-        Check if DDP is working properly.
-        Should be called by all process.
+        Check if Distributed Data Parallel (DDP) is working properly.
+        
+        This method should verify that parameters are synchronized
+        across processes in distributed training.
+        
+        Note: Should be called by all processes.
         """
         pass
 
     @abstractmethod
     def training_losses(**mb_data):
         """
-        Compute training losses.
+        Compute training losses from a minibatch of data.
+        
+        This method should be implemented to compute all loss components
+        needed for training.
+        
+        Args:
+            **mb_data: Minibatch data
+            
+        Returns:
+            dict: Dictionary of loss components
         """
         pass
     
     def load_data(self):
         """
-        Load data.
+        Load a batch of data from the dataloader.
+        
+        If prefetching is enabled, alternates between using a pre-fetched
+        batch and loading the next batch in the background.
+        
+        Returns:
+            list: List of data dictionaries, split according to batch_split
         """
         if self.prefetch_data:
             if self._data_prefetched is None:
@@ -320,7 +462,7 @@ class Trainer:
         else:
             data = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
         
-        # if the data is a dict, we need to split it into multiple dicts with batch_size_per_gpu
+        # Split data into multiple microbatches if needed
         if isinstance(data, dict):
             if self.batch_split == 1:
                 data_list = [data]
@@ -340,13 +482,30 @@ class Trainer:
     @abstractmethod
     def run_step(self, data_list):
         """
-        Run a training step.
+        Run a single training step.
+        
+        This method should be implemented to process a batch of data,
+        compute losses, and update model parameters.
+        
+        Args:
+            data_list: List of data batches
+            
+        Returns:
+            dict: Dictionary of metrics/losses for logging
         """
         pass
 
     def run(self):
         """
-        Run training.
+        Run the full training loop.
+        
+        This method handles the main training loop, including:
+        - Data loading
+        - Running training steps
+        - Logging metrics
+        - Creating snapshots
+        - Saving checkpoints
+        - Monitoring progress
         """
         if self.is_master:
             print('\nStarting training...')
@@ -362,6 +521,7 @@ class Trainer:
         while self.step < self.max_steps:
             time_start = time.time()
 
+            # Load data and run training step
             data_list = self.load_data()
             step_log = self.run_step(data_list)
 
@@ -370,7 +530,7 @@ class Trainer:
 
             self.step += 1
 
-            # Print progress
+            # Print progress at regular intervals
             if self.is_master and self.step % self.i_print == 0:
                 speed = self.i_print / (time_elapsed - time_last_print) * 3600
                 columns = [
@@ -382,43 +542,44 @@ class Trainer:
                 print(' | '.join([c.ljust(25) for c in columns]), flush=True)
                 time_last_print = time_elapsed
 
-            # Check ddp
+            # Check DDP synchronization at regular intervals
             if self.world_size > 1 and self.i_ddpcheck is not None and self.step % self.i_ddpcheck == 0:
                 self.check_ddp()
 
-            # Sample images
+            # Generate and save sample images at regular intervals
             if self.step % self.i_sample == 0:
                 self.snapshot()
 
+            # Handle logging on master process
             if self.is_master:
                 log.append((self.step, {}))
 
-                # Log time
+                # Log timing information
                 log[-1][1]['time'] = {
                     'step': time_end - time_start,
                     'elapsed': time_elapsed,
                 }
 
-                # Log losses
+                # Log training metrics
                 if step_log is not None:
                     log[-1][1].update(step_log)
 
-                # Log scale
+                # Log scaling factor for mixed precision training
                 if self.fp16_mode == 'amp':
                     log[-1][1]['scale'] = self.scaler.get_scale()
                 elif self.fp16_mode == 'inflat_all':
                     log[-1][1]['log_scale'] = self.log_scale
 
-                # Save log
+                # Write logs to file and tensorboard at regular intervals
                 if self.step % self.i_log == 0:
-                    ## save to log file
+                    ## Save to log file
                     log_str = '\n'.join([
                         f'{step}: {json.dumps(log)}' for step, log in log
                     ])
                     with open(os.path.join(self.output_dir, 'log.txt'), 'a') as log_file:
                         log_file.write(log_str + '\n')
 
-                    # show with mlflow
+                    # Write to tensorboard
                     log_show = [l for _, l in log if not dict_any(l, lambda x: np.isnan(x))]
                     log_show = dict_reduce(log_show, lambda x: np.mean(x))
                     log_show = dict_flatten(log_show, sep='/')
@@ -426,10 +587,11 @@ class Trainer:
                         self.writer.add_scalar(key, value, self.step)
                     log = []
 
-                # Save checkpoint
+                # Save checkpoint at regular intervals
                 if self.step % self.i_save == 0:
                     self.save()
 
+        # Final steps after training is complete
         if self.is_master:
             self.snapshot(suffix='final')
             self.writer.close()
@@ -437,7 +599,14 @@ class Trainer:
             
     def profile(self, wait=2, warmup=3, active=5):
         """
-        Profile the training loop.
+        Profile the training loop for performance analysis.
+        
+        Uses PyTorch's profiling tools to collect performance metrics.
+        
+        Args:
+            wait: Number of steps to wait before profiling
+            warmup: Number of warmup steps for profiling
+            active: Number of active profiling steps
         """
         with torch.profiler.profile(
             schedule=torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=1),
@@ -448,4 +617,3 @@ class Trainer:
             for _ in range(wait + warmup + active):
                 self.run_step()
                 prof.step()
-            

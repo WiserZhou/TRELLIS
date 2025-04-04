@@ -126,7 +126,7 @@ class SLatVaeMeshDecoderTrainer(BasicTrainer):
         gt_tsdf = torch.clamp(gt_tsdf, -delta, delta)
         return torch.mean((tsdf - gt_tsdf) ** 2)
     
-    def _calc_tsdf_loss(self, reps : list[MeshExtractResult], depth_maps, extrinsics, intrinsics) -> torch.Tensor:
+    def _calc_tsdf_loss(self, reps : List[MeshExtractResult], depth_maps, extrinsics, intrinsics) -> torch.Tensor:
         tsdf_loss = 0.0
         for i, rep in enumerate(reps):
             tsdf_loss += self._tsdf_reg_loss(rep, depth_maps[i], extrinsics[i], intrinsics[i])

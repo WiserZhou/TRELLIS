@@ -7,59 +7,144 @@ import argparse
 import pandas as pd
 from easydict import EasyDict as edict
 from functools import partial
-from subprocess import DEVNULL, call
 import numpy as np
 from utils import sphere_hammersley_sequence
 
 
-BLENDER_LINK = 'https://download.blender.org/release/Blender3.0/blender-3.0.1-linux-x64.tar.xz'
-BLENDER_INSTALLATION_PATH = '/tmp'
-BLENDER_PATH = f'{BLENDER_INSTALLATION_PATH}/blender-3.0.1-linux-x64/blender'
-
-def _install_blender():
-    if not os.path.exists(BLENDER_PATH):
-        os.system('sudo apt-get update')
-        os.system('sudo apt-get install -y libxrender1 libxi6 libxkbcommon-x11-0 libsm6')
-        os.system(f'wget {BLENDER_LINK} -P {BLENDER_INSTALLATION_PATH}')
-        os.system(f'tar -xvf {BLENDER_INSTALLATION_PATH}/blender-3.0.1-linux-x64.tar.xz -C {BLENDER_INSTALLATION_PATH}')
-
-
 def _render_cond(file_path, sha256, output_dir, num_views):
-    output_folder = os.path.join(output_dir, 'renders_cond', sha256)
+    """
+    Render a 3D model for conditioning purposes using vrenderer.
     
-    # Build camera {yaw, pitch, radius, fov}
-    yaws = []
-    pitchs = []
+    Args:
+        file_path: Path to the 3D model file
+        sha256: SHA256 hash of the model file, used as identifier
+        output_dir: Directory to save rendered images
+        num_views: Number of views to render
+        
+    Returns:
+        Dictionary with rendering results
+    """
+    from vrenderer.render import initialize, render_and_save
+    from vrenderer.spec import InitializationSettings, RuntimeSettings, CameraSpec
+    from vrenderer.ops import polar_to_transform_matrix
+    import math
+    
+    output_folder = os.path.join(output_dir, 'renders_cond', sha256)
+    os.makedirs(output_folder, exist_ok=True)
+    
+    # Initialize model settings with normalized scale and merged vertices
+    initialization_settings = InitializationSettings(
+        file_path=os.path.expanduser(file_path),
+        merge_vertices=True, 
+        normalizing_scale=0.5
+    )
+    initialization_output = initialize(initialization_settings)
+    
+    # Calculate camera field of view
+    default_camera_lens = 50
+    default_camera_sensor_width = 36
+    camera_angle_x = 2.0*math.atan(default_camera_sensor_width/2/default_camera_lens)
+    fov_deg = math.degrees(camera_angle_x)
+    
+    # Calculate camera distance based on model bounding box
+    bbox_size = np.array(initialization_output.normalization_spec.bbox_max) - np.array(initialization_output.normalization_spec.bbox_min)
+    ratio = 1.0
+    distance = ratio * default_camera_lens / default_camera_sensor_width * \
+        math.sqrt(bbox_size[0]**2 + bbox_size[1]**2+bbox_size[2]**2)
+    
+    # Generate camera positions using Hammersley sequence
+    cameras = []
     offset = (np.random.rand(), np.random.rand())
-    for i in range(num_views):
-        y, p = sphere_hammersley_sequence(i, num_views, offset)
-        yaws.append(y)
-        pitchs.append(p)
+    
+    # Calculate variable camera parameters as in single_dataset_toolkits version
     fov_min, fov_max = 10, 70
     radius_min = np.sqrt(3) / 2 / np.sin(fov_max / 360 * np.pi)
     radius_max = np.sqrt(3) / 2 / np.sin(fov_min / 360 * np.pi)
     k_min = 1 / radius_max**2
     k_max = 1 / radius_min**2
-    ks = np.random.uniform(k_min, k_max, (1000000,))
-    radius = [1 / np.sqrt(k) for k in ks]
-    fov = [2 * np.arcsin(np.sqrt(3) / 2 / r) for r in radius]
-    views = [{'yaw': y, 'pitch': p, 'radius': r, 'fov': f} for y, p, r, f in zip(yaws, pitchs, radius, fov)]
+    ks = np.random.uniform(k_min, k_max, (num_views,))
+    radii = [1 / np.sqrt(k) for k in ks]
+    fovs = [2 * np.arcsin(np.sqrt(3) / 2 / r) / np.pi * 180 for r in radii]
     
-    args = [
-        BLENDER_PATH, '-b', '-P', os.path.join(os.path.dirname(__file__), 'blender_script', 'render.py'),
-        '--',
-        '--views', json.dumps(views),
-        '--object', os.path.expanduser(file_path),
-        '--output_folder', os.path.expanduser(output_folder),
-        '--resolution', '1024',
-    ]
-    if file_path.endswith('.blend'):
-        args.insert(1, file_path)
+    for i in range(num_views):
+        yaw, pitch = sphere_hammersley_sequence(i, num_views, offset)
+        
+        # Convert yaw/pitch to elevation/azimuth angles
+        elevation = math.degrees(pitch)
+        azimuth = math.degrees(yaw)
+        
+        # Use variable distance and FOV instead of fixed values
+        current_distance = distance * radii[i]
+        current_fov_deg = fovs[i]
+        
+        cameras.append(CameraSpec(
+            projection_type="PERSP",
+            transform_matrix=polar_to_transform_matrix(elevation, azimuth, current_distance),
+            fov_deg=current_fov_deg,
+        ))
     
-    call(args, stdout=DEVNULL)
+    # Configure render settings
+    runtime_settings = RuntimeSettings(
+        use_environment_map=False,
+        frame_index=1,
+        engine="BLENDER_EEVEE",  # Using BLENDER_EEVEE as per original script
+        resolution_x=1024,       # Using the 1024 resolution from the original _render_cond
+        resolution_y=1024,
+        use_gtao=True,
+        use_ssr=True,
+        use_high_quality_normals=True,
+        use_auto_smooth=True,
+        auto_smooth_angle_deg=30.,
+        blend_mode="OPAQUE"
+    )
+
+    # Render images
+    render_outputs = render_and_save(
+        settings=runtime_settings,
+        cameras=cameras,
+        initialization_output=initialization_output,
+        save_dir=output_folder,
+        name_format="{camera_index:04d}.{file_ext}",
+        render_types={"Color"},
+        overwrite=True
+    )
     
+    # Create transforms.json file
+    transforms = {
+        "frames": [],
+        "camera_params": [
+            {
+                "projection_type": cam.projection_type,
+                "transform_matrix": cam.transform_matrix.tolist() if hasattr(cam.transform_matrix, 'tolist') 
+                    else [list(row) for row in cam.transform_matrix],
+                "fov_deg": cam.fov_deg
+            } for cam in cameras
+        ],
+        "normalization": {
+            "scaling_factor": initialization_output.normalization_spec.scaling_factor,
+            "rotation_euler": initialization_output.normalization_spec.rotation_euler,
+            "translation": initialization_output.normalization_spec.translation,
+            "bbox_min": initialization_output.normalization_spec.bbox_min,
+            "bbox_max": initialization_output.normalization_spec.bbox_max
+        }
+    }
+    
+    # Add frame data with file paths
+    for i in range(num_views):
+        transforms["frames"].append({
+            "file_path": f"{i:04d}.webp",
+            "transform_matrix": transforms["camera_params"][i]["transform_matrix"],
+            "camera_angle_x": transforms["camera_params"][i]["fov_deg"] * (math.pi / 180.0)
+        })
+    
+    # Save transforms.json
+    with open(os.path.join(output_folder, 'transforms.json'), 'w') as f:
+        json.dump(transforms, f, indent=2)
+    
+    # Check if rendering was successful
     if os.path.exists(os.path.join(output_folder, 'transforms.json')):
         return {'sha256': sha256, 'cond_rendered': True}
+    return {'sha256': sha256, 'cond_rendered': False}
 
 
 if __name__ == '__main__':
@@ -82,10 +167,6 @@ if __name__ == '__main__':
     opt = edict(vars(opt))
 
     os.makedirs(os.path.join(opt.output_dir, 'renders_cond'), exist_ok=True)
-    
-    # install blender
-    print('Checking blender...', flush=True)
-    _install_blender()
 
     # get file list
     if not os.path.exists(os.path.join(opt.output_dir, 'metadata.csv')):
