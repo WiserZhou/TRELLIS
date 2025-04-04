@@ -1,3 +1,15 @@
+"""
+This file (`data_utils.py`) provides utility functions and classes for data handling in deep learning models.
+It includes tools for moving tensors to specific devices, load-balancing utilities for distributed training,
+and custom samplers for PyTorch DataLoaders that support resumable training and balanced data distribution.
+
+Key components:
+- Recursive device transfer functionality
+- Load balancing utilities for distributing data across processes
+- Cyclical iteration through data loaders
+- Custom resumable samplers for distributed training
+"""
+
 from typing import *
 import math
 import torch
@@ -13,12 +25,26 @@ def recursive_to_device(
 ) -> Any:
     """
     Recursively move all tensors in a data structure to a device.
+    
+    This function traverses nested data structures (lists, tuples, dictionaries)
+    and moves any PyTorch tensor to the specified device.
+    
+    Args:
+        data: The data structure containing tensors to be moved
+        device: The target device (CPU, GPU) to move tensors to
+        non_blocking: If True, allows asynchronous copy to device if possible
+        
+    Returns:
+        The same data structure with all tensors moved to the specified device
     """
     if hasattr(data, "to"):
+        print("Moving data to device")
         return data.to(device, non_blocking=non_blocking)
     elif isinstance(data, (list, tuple)):
+        print("list or tuple detected") 
         return type(data)(recursive_to_device(d, device, non_blocking) for d in data)
     elif isinstance(data, dict):
+        print("dict detected")
         return {k: recursive_to_device(v, device, non_blocking) for k, v in data.items()}
     else:
         return data
@@ -31,38 +57,66 @@ def load_balanced_group_indices(
 ) -> List[List[int]]:
     """
     Split indices into groups with balanced load.
+    
+    This function distributes indices across groups to achieve balanced workload.
+    It uses a greedy algorithm that assigns each index to the group with the 
+    minimum current load.
+    
+    Args:
+        load: List of load values for each index
+        num_groups: Number of groups to split indices into
+        equal_size: If True, each group will have the same number of elements
+        
+    Returns:
+        List of lists, where each inner list contains indices assigned to a group
     """
     if equal_size:
         group_size = len(load) // num_groups
-    indices = np.argsort(load)[::-1]
+    indices = np.argsort(load)[::-1]  # Sort indices by load in descending order
     groups = [[] for _ in range(num_groups)]
     group_load = np.zeros(num_groups)
     for idx in indices:
         min_group_idx = np.argmin(group_load)
         groups[min_group_idx].append(idx)
         if equal_size and len(groups[min_group_idx]) == group_size:
-            group_load[min_group_idx] = float('inf')
+            group_load[min_group_idx] = float('inf')  # Mark group as full
         else:
             group_load[min_group_idx] += load[idx]
     return groups
 
 
 def cycle(data_loader: DataLoader) -> Iterator:
+    """
+    Creates an infinite iterator over a data loader.
+    
+    This function wraps a data loader to cycle through it repeatedly, 
+    handling epoch tracking for various sampler types.
+    
+    Args:
+        data_loader: The DataLoader to cycle through
+        
+    Returns:
+        An iterator that indefinitely yields batches from the data loader
+    """
     while True:
         for data in data_loader:
             if isinstance(data_loader.sampler, ResumableSampler):
-                data_loader.sampler.idx += data_loader.batch_size   # type: ignore[attr-defined]
+                data_loader.sampler.idx += data_loader.batch_size   # Update position for resumability
             yield data
         if isinstance(data_loader.sampler, DistributedSampler):
-            data_loader.sampler.epoch += 1
+            data_loader.sampler.epoch += 1  # Update epoch for DistributedSampler
         if isinstance(data_loader.sampler, ResumableSampler):
-            data_loader.sampler.epoch += 1
-            data_loader.sampler.idx = 0
+            data_loader.sampler.epoch += 1  # Update epoch for ResumableSampler
+            data_loader.sampler.idx = 0     # Reset position index
         
 
 class ResumableSampler(Sampler):
     """
     Distributed sampler that is resumable.
+
+    This sampler extends PyTorch's Sampler to support resuming training from
+    a specific point. It tracks the current position (idx) and epoch to 
+    enable checkpointing and resuming.
 
     Args:
         dataset: Dataset used for sampling.
@@ -88,53 +142,53 @@ class ResumableSampler(Sampler):
         drop_last: bool = False,
     ) -> None:
         self.dataset = dataset
-        self.epoch = 0
-        self.idx = 0
+        self.epoch = 0       # Current epoch counter
+        self.idx = 0         # Current index position for resuming
         self.drop_last = drop_last
-        self.world_size = dist.get_world_size() if dist.is_initialized() else 1
-        self.rank = dist.get_rank() if dist.is_initialized() else 0
-        # If the dataset length is evenly divisible by # of replicas, then there
-        # is no need to drop any data, since the dataset will be split equally.
-        if self.drop_last and len(self.dataset) % self.world_size != 0:  # type: ignore[arg-type]
-            # Split to nearest available length that is evenly divisible.
-            # This is to ensure each rank receives the same amount of data when
-            # using this Sampler.
+        self.world_size = dist.get_world_size() if dist.is_initialized() else 1  # Get total number of processes
+        self.rank = dist.get_rank() if dist.is_initialized() else 0              # Get current process rank
+        
+        # Calculate number of samples per process
+        if self.drop_last and len(self.dataset) % self.world_size != 0:  
+            # Split to nearest available length that is evenly divisible
+            # This ensures each rank receives the same amount of data
             self.num_samples = math.ceil(
-                (len(self.dataset) - self.world_size) / self.world_size  # type: ignore[arg-type]
+                (len(self.dataset) - self.world_size) / self.world_size  
             )
         else:
-            self.num_samples = math.ceil(len(self.dataset) / self.world_size)  # type: ignore[arg-type]
-        self.total_size = self.num_samples * self.world_size
+            self.num_samples = math.ceil(len(self.dataset) / self.world_size)  
+            
+        self.total_size = self.num_samples * self.world_size  # Total size after padding
         self.shuffle = shuffle
         self.seed = seed
 
     def __iter__(self) -> Iterator:
         if self.shuffle:
-            # deterministically shuffle based on epoch and seed
+            # Deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()  # type: ignore[arg-type]
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()  
         else:
-            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+            indices = list(range(len(self.dataset)))  
 
         if not self.drop_last:
-            # add extra samples to make it evenly divisible
+            # Add extra samples to make it evenly divisible across processes
             padding_size = self.total_size - len(indices)
             if padding_size <= len(indices):
-                indices += indices[:padding_size]
+                indices += indices[:padding_size]  # Reuse some samples from the beginning
             else:
                 indices += (indices * math.ceil(padding_size / len(indices)))[
                     :padding_size
-                ]
+                ]  # Repeat samples if padding_size > len(indices)
         else:
-            # remove tail of data to make it evenly divisible.
+            # Remove tail of data to make it evenly divisible
             indices = indices[: self.total_size]
         assert len(indices) == self.total_size
 
-        # subsample
+        # Subsample according to rank for distributed training
         indices = indices[self.rank : self.total_size : self.world_size]
         
-        # resume from previous state
+        # Resume from previous state by skipping already processed indices
         indices = indices[self.idx:]
 
         return iter(indices)
@@ -143,12 +197,28 @@ class ResumableSampler(Sampler):
         return self.num_samples
 
     def state_dict(self) -> Dict[str, int]:
+        """
+        Returns the state of the sampler as a dictionary.
+        
+        This enables saving the sampler state for checkpointing.
+        
+        Returns:
+            Dictionary containing epoch and current index
+        """
         return {
             'epoch': self.epoch,
             'idx': self.idx,
         }
         
     def load_state_dict(self, state_dict):
+        """
+        Loads the sampler state from a dictionary.
+        
+        This enables restoring the sampler state from a checkpoint.
+        
+        Args:
+            state_dict: Dictionary containing sampler state
+        """
         self.epoch = state_dict['epoch']
         self.idx = state_dict['idx']
         
@@ -157,11 +227,12 @@ class BalancedResumableSampler(ResumableSampler):
     """
     Distributed sampler that is resumable and balances the load among the processes.
 
+    This sampler extends ResumableSampler to distribute data across processes
+    in a load-balanced manner, ensuring that each process receives a similar
+    computational workload despite potentially varying sample processing times.
+
     Args:
-        dataset: Dataset used for sampling.
-        rank (int, optional): Rank of the current process within :attr:`num_replicas`.
-            By default, :attr:`rank` is retrieved from the current distributed
-            group.
+        dataset: Dataset used for sampling. Must have 'loads' attribute.
         shuffle (bool, optional): If ``True`` (default), sampler will shuffle the
             indices.
         seed (int, optional): random seed used to shuffle the sampler if
@@ -171,6 +242,7 @@ class BalancedResumableSampler(ResumableSampler):
             tail of the data to make it evenly divisible across the number of
             replicas. If ``False``, the sampler will add extra indices to make
             the data evenly divisible across the replicas. Default: ``False``.
+        batch_size (int, optional): Size of mini-batches used for balancing. Default: 1.
     """
 
     def __init__(
@@ -184,19 +256,19 @@ class BalancedResumableSampler(ResumableSampler):
         assert hasattr(dataset, 'loads'), 'Dataset must have "loads" attribute to use BalancedResumableSampler'
         super().__init__(dataset, shuffle, seed, drop_last)
         self.batch_size = batch_size
-        self.loads = dataset.loads
+        self.loads = dataset.loads  # Load values for each sample in the dataset
         
     def __iter__(self) -> Iterator:
         if self.shuffle:
-            # deterministically shuffle based on epoch and seed
+            # Deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()  # type: ignore[arg-type]
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()  
         else:
-            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+            indices = list(range(len(self.dataset)))  
 
         if not self.drop_last:
-            # add extra samples to make it evenly divisible
+            # Add extra samples to make it evenly divisible
             padding_size = self.total_size - len(indices)
             if padding_size <= len(indices):
                 indices += indices[:padding_size]
@@ -205,11 +277,11 @@ class BalancedResumableSampler(ResumableSampler):
                     :padding_size
                 ]
         else:
-            # remove tail of data to make it evenly divisible.
+            # Remove tail of data to make it evenly divisible
             indices = indices[: self.total_size]
         assert len(indices) == self.total_size
 
-        # balance load among processes
+        # Balance load among processes by distributing batches based on their loads
         num_batches = len(indices) // (self.batch_size * self.world_size)
         balanced_indices = []
         for i in range(num_batches):
@@ -220,7 +292,37 @@ class BalancedResumableSampler(ResumableSampler):
             groups = load_balanced_group_indices(batch_loads, self.world_size, equal_size=True)
             balanced_indices.extend([batch_indices[j] for j in groups[self.rank]])
         
-        # resume from previous state
+        # Resume from previous state
         indices = balanced_indices[self.idx:]
 
         return iter(indices)
+
+
+class DuplicatedDataset(torch.utils.data.Dataset):
+    """Dataset wrapper that duplicates a dataset multiple times."""
+    
+    def __init__(self, dataset, repeat=1000):
+        """
+        Initialize the duplicated dataset.
+        
+        Args:
+            dataset: Original dataset to duplicate
+            repeat: Number of times to repeat the dataset
+        """
+        self.dataset = dataset
+        self.repeat = repeat
+        self.original_length = len(dataset)
+        
+    def __getitem__(self, idx):
+        """Get an item from the original dataset, repeating as needed."""
+        return self.dataset[idx % self.original_length]
+    
+    def __len__(self):
+        """Return the length of the duplicated dataset."""
+        return self.original_length * self.repeat
+    
+    def __getattr__(self, name):
+        """Forward all other attribute accesses to the original dataset."""
+        if name == 'dataset' or name == 'repeat' or name == 'original_length':
+            return object.__getattribute__(self, name)
+        return getattr(self.dataset, name)

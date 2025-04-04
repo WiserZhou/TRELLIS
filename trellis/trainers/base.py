@@ -29,9 +29,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .utils import *
 from ..utils.general_utils import *
-from ..utils.data_utils import recursive_to_device, cycle, ResumableSampler
+from ..utils.data_utils import recursive_to_device, cycle, ResumableSampler, DuplicatedDataset
 
-
+from tqdm import tqdm
 class Trainer:
     """
     Base class for training.
@@ -198,6 +198,14 @@ class Trainer:
         Sets up the data sampler and dataloader with appropriate batch size,
         workers, and other configurations for efficient data loading.
         """
+        num_dataset = 128
+        # Wrap your dataset in the DuplicatedDataset if it's too small
+        if len(self.dataset) < num_dataset:  # Adjust this threshold as needed
+            from ..utils.data_utils import DuplicatedDataset
+
+            self.dataset = DuplicatedDataset(self.dataset, repeat=num_dataset)
+            print(f"Dataset duplicated to {len(self.dataset)} samples")
+        
         self.data_sampler = ResumableSampler(
             self.dataset,
             shuffle=True,
@@ -212,6 +220,8 @@ class Trainer:
             collate_fn=self.dataset.collate_fn if hasattr(self.dataset, 'collate_fn') else None,
             sampler=self.data_sampler,
         )
+
+
         self.data_iterator = cycle(self.dataloader)
 
     @abstractmethod
@@ -302,6 +312,8 @@ class Trainer:
         Args:
             num_samples: Number of samples to visualize
         """
+        print(f"Starting snapshot_dataset with {num_samples} samples...")
+        print("Creating dataloader...")
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=num_samples,
@@ -309,14 +321,19 @@ class Trainer:
             shuffle=True,
             collate_fn=self.dataset.collate_fn if hasattr(self.dataset, 'collate_fn') else None,
         )
+        print("Dataloader created, retrieving batch...")
         data = next(iter(dataloader))
+        print("Batch retrieved, moving to device...")
         data = recursive_to_device(data, self.device)
+        print("Data moved to device, visualizing sample...")
         vis = self.visualize_sample(data)
+        print("Sample visualized, preparing to save images...")
         if isinstance(vis, dict):
             save_cfg = [(f'dataset_{k}', v) for k, v in vis.items()]
         else:
             save_cfg = [('dataset', vis)]
         for name, image in save_cfg:
+            print(f"Saving image {name}...")
             utils.save_image(
                 image,
                 os.path.join(self.output_dir, 'samples', f'{name}.jpg'),
@@ -324,6 +341,8 @@ class Trainer:
                 normalize=True,
                 value_range=self.dataset.value_range,
             )
+            print(f"Image {name} saved successfully")
+        print("snapshot_dataset completed")
 
     @torch.no_grad()
     def snapshot(self, suffix=None, num_samples=64, batch_size=4, verbose=False):
@@ -454,29 +473,43 @@ class Trainer:
         Returns:
             list: List of data dictionaries, split according to batch_split
         """
+        print(f"Step {self.step}: load_data - Starting to load data")
         if self.prefetch_data:
             if self._data_prefetched is None:
+                print(f"Step {self.step}: load_data - No prefetched data available, fetching first batch")
                 self._data_prefetched = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
+                print(f"Step {self.step}: load_data - First batch fetched")
             data = self._data_prefetched
+            print(f"Step {self.step}: load_data - Using prefetched data, prefetching next batch")
             self._data_prefetched = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
+            print(f"Step {self.step}: load_data - Next batch prefetched")
         else:
+            print(f"Step {self.step}: load_data - Prefetching disabled, loading batch directly")
             data = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
+            print(f"Step {self.step}: load_data - Batch loaded directly")
         
         # Split data into multiple microbatches if needed
+        print(f"Step {self.step}: load_data - Preparing to split data into {self.batch_split} microbatches")
         if isinstance(data, dict):
             if self.batch_split == 1:
+                print(f"Step {self.step}: load_data - No splitting needed, using single batch")
                 data_list = [data]
             else:
+                print(f"Step {self.step}: load_data - Splitting data into {self.batch_split} microbatches")
                 batch_size = list(data.values())[0].shape[0]
                 data_list = [
                     {k: v[i * batch_size // self.batch_split:(i + 1) * batch_size // self.batch_split] for k, v in data.items()}
                     for i in range(self.batch_split)
                 ]
+                print(f"Step {self.step}: load_data - Data successfully split into {len(data_list)} microbatches")
         elif isinstance(data, list):
+            print(f"Step {self.step}: load_data - Data is already a list of {len(data)} items")
             data_list = data
         else:
+            print(f"Step {self.step}: load_data - ERROR: Data type {type(data)} not supported")
             raise ValueError('Data must be a dict or a list of dicts.')
         
+        print(f"Step {self.step}: load_data - Returning data list with {len(data_list)} items")
         return data_list
 
     @abstractmethod
@@ -518,10 +551,22 @@ class Trainer:
         log = []
         time_last_print = 0.0
         time_elapsed = 0.0
+
+        # Initialize progress bar (only on master process)
+        pbar = None
+        if self.is_master:
+            pbar = tqdm(
+                initial=self.step,
+                total=self.max_steps,
+                desc="Training",
+                unit="step",
+                dynamic_ncols=True,
+                leave=True
+            )
+
         while self.step < self.max_steps:
             time_start = time.time()
 
-            # Load data and run training step
             data_list = self.load_data()
             step_log = self.run_step(data_list)
 
@@ -529,18 +574,20 @@ class Trainer:
             time_elapsed += time_end - time_start
 
             self.step += 1
-
-            # Print progress at regular intervals
-            if self.is_master and self.step % self.i_print == 0:
-                speed = self.i_print / (time_elapsed - time_last_print) * 3600
-                columns = [
-                    f'Step: {self.step}/{self.max_steps} ({self.step / self.max_steps * 100:.2f}%)',
-                    f'Elapsed: {time_elapsed / 3600:.2f} h',
-                    f'Speed: {speed:.2f} steps/h',
-                    f'ETA: {(self.max_steps - self.step) / speed:.2f} h',
-                ]
-                print(' | '.join([c.ljust(25) for c in columns]), flush=True)
-                time_last_print = time_elapsed
+            
+            # Update progress bar on master process
+            if self.is_master and pbar is not None:
+                pbar.update(1)
+                
+                # Update progress bar description with speed and ETA
+                if self.step % self.i_print == 0:
+                    speed = self.i_print / (time_elapsed - time_last_print) * 3600
+                    pbar_desc = f"Training | Step: {self.step}/{self.max_steps} | " \
+                                f"Speed: {speed:.2f} steps/h | " \
+                                f"Elapsed: {time_elapsed/3600:.2f}h | " \
+                                f"ETA: {(self.max_steps-self.step)/speed:.2f}h"
+                    pbar.set_description(pbar_desc)
+                    time_last_print = time_elapsed
 
             # Check DDP synchronization at regular intervals
             if self.world_size > 1 and self.i_ddpcheck is not None and self.step % self.i_ddpcheck == 0:
@@ -591,8 +638,11 @@ class Trainer:
                 if self.step % self.i_save == 0:
                     self.save()
 
-        # Final steps after training is complete
-        if self.is_master:
+        # Clean up progress bar when training is complete
+        if self.is_master and pbar is not None:
+            pbar.close()
+            
+            # Final steps after training is complete
             self.snapshot(suffix='final')
             self.writer.close()
             print('Training finished.')
