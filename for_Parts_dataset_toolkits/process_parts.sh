@@ -4,7 +4,9 @@ python dataset_toolkits/download.py Parts --output_dir datasets/Parts
 python dataset_toolkits/build_metadata.py Parts --output_dir datasets/Parts
 
 # render
-nohup python3 dataset_toolkits/render.py Parts --output_dir datasets/Parts > render.log 2>&1 &
+python3 dataset_toolkits/render.py Parts --output_dir datasets/Parts
+python3 dataset_toolkits/transfer_ply.py Parts --output_dir datasets/Parts
+
 python dataset_toolkits/build_metadata.py Parts --output_dir datasets/Parts
 
 python dataset_toolkits/voxelize.py Parts --output_dir datasets/Parts
