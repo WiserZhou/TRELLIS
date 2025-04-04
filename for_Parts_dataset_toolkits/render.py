@@ -22,6 +22,11 @@ from functools import partial
 import numpy as np
 from utils import sphere_hammersley_sequence
 
+from vrenderer.render import initialize, render_and_save
+from vrenderer.spec import InitializationSettings, RuntimeSettings, CameraSpec
+from vrenderer.ops import polar_to_transform_matrix
+import math
+
 def _render(file_path, sha256, output_dir, num_views):
     """
     Render a 3D model from multiple viewpoints using vrenderer.
@@ -35,10 +40,6 @@ def _render(file_path, sha256, output_dir, num_views):
     Returns:
         Dictionary with rendering results
     """
-    from vrenderer.render import initialize, render_and_save
-    from vrenderer.spec import InitializationSettings, RuntimeSettings, CameraSpec
-    from vrenderer.ops import polar_to_transform_matrix
-    import math
     
     output_folder = os.path.join(output_dir, 'renders', sha256)
     os.makedirs(output_folder, exist_ok=True)

@@ -219,7 +219,7 @@ class ImageConditionedMixin:
         image_root = os.path.join(root, 'renders_cond', instance)
         with open(os.path.join(image_root, 'transforms.json')) as f:
             metadata = json.load(f)
-            
+        
         # Select a random view from available frames
         n_views = len(metadata['frames'])
         view = np.random.randint(n_views)

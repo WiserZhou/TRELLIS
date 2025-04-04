@@ -126,8 +126,7 @@ class BasicTrainer(Trainer):
 
         # Build master params
         self.model_params = sum(
-            [[p for p in model.parameters() if p.requires_grad] for model in self.models.values()]
-        , [])
+            [[p for p in model.parameters() if p.requires_grad] for model in self.models.values()], [])
         if self.fp16_mode == 'amp':
             # For AMP mode, we use PyTorch's automatic mixed precision
             self.master_params = self.model_params
@@ -234,7 +233,7 @@ class BasicTrainer(Trainer):
         """
         if self.is_master:
             print(f'\nLoading checkpoint from step {step}...', end='')
-            
+        
         # Load models
         model_ckpts = {}
         for name, model in self.models.items():

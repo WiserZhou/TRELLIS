@@ -312,8 +312,8 @@ class Trainer:
         Args:
             num_samples: Number of samples to visualize
         """
-        print(f"Starting snapshot_dataset with {num_samples} samples...")
-        print("Creating dataloader...")
+        # print(f"Starting snapshot_dataset with {num_samples} samples...")
+        # print("Creating dataloader...")
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=num_samples,
@@ -321,19 +321,19 @@ class Trainer:
             shuffle=True,
             collate_fn=self.dataset.collate_fn if hasattr(self.dataset, 'collate_fn') else None,
         )
-        print("Dataloader created, retrieving batch...")
+        # print("Dataloader created, retrieving batch...")
         data = next(iter(dataloader))
-        print("Batch retrieved, moving to device...")
+        # print("Batch retrieved, moving to device...")
         data = recursive_to_device(data, self.device)
-        print("Data moved to device, visualizing sample...")
+        # print("Data moved to device, visualizing sample...")
         vis = self.visualize_sample(data)
-        print("Sample visualized, preparing to save images...")
+        # print("Sample visualized, preparing to save images...")
         if isinstance(vis, dict):
             save_cfg = [(f'dataset_{k}', v) for k, v in vis.items()]
         else:
             save_cfg = [('dataset', vis)]
         for name, image in save_cfg:
-            print(f"Saving image {name}...")
+            # print(f"Saving image {name}...")
             utils.save_image(
                 image,
                 os.path.join(self.output_dir, 'samples', f'{name}.jpg'),
@@ -341,8 +341,8 @@ class Trainer:
                 normalize=True,
                 value_range=self.dataset.value_range,
             )
-            print(f"Image {name} saved successfully")
-        print("snapshot_dataset completed")
+            # print(f"Image {name} saved successfully")
+        # print("snapshot_dataset completed")
 
     @torch.no_grad()
     def snapshot(self, suffix=None, num_samples=64, batch_size=4, verbose=False, index=0):
@@ -492,43 +492,43 @@ class Trainer:
         Returns:
             list: List of data dictionaries, split according to batch_split
         """
-        print(f"Step {self.step}: load_data - Starting to load data")
+        # print(f"Step {self.step}: load_data - Starting to load data")
         if self.prefetch_data:
             if self._data_prefetched is None:
-                print(f"Step {self.step}: load_data - No prefetched data available, fetching first batch")
+                # print(f"Step {self.step}: load_data - No prefetched data available, fetching first batch")
                 self._data_prefetched = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
-                print(f"Step {self.step}: load_data - First batch fetched")
+                # print(f"Step {self.step}: load_data - First batch fetched")
             data = self._data_prefetched
-            print(f"Step {self.step}: load_data - Using prefetched data, prefetching next batch")
+            # print(f"Step {self.step}: load_data - Using prefetched data, prefetching next batch")
             self._data_prefetched = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
-            print(f"Step {self.step}: load_data - Next batch prefetched")
+            # print(f"Step {self.step}: load_data - Next batch prefetched")
         else:
-            print(f"Step {self.step}: load_data - Prefetching disabled, loading batch directly")
+            # print(f"Step {self.step}: load_data - Prefetching disabled, loading batch directly")
             data = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
-            print(f"Step {self.step}: load_data - Batch loaded directly")
+            # print(f"Step {self.step}: load_data - Batch loaded directly")
         
         # Split data into multiple microbatches if needed
-        print(f"Step {self.step}: load_data - Preparing to split data into {self.batch_split} microbatches")
+        # print(f"Step {self.step}: load_data - Preparing to split data into {self.batch_split} microbatches")
         if isinstance(data, dict):
             if self.batch_split == 1:
-                print(f"Step {self.step}: load_data - No splitting needed, using single batch")
+                # print(f"Step {self.step}: load_data - No splitting needed, using single batch")
                 data_list = [data]
             else:
-                print(f"Step {self.step}: load_data - Splitting data into {self.batch_split} microbatches")
+                # print(f"Step {self.step}: load_data - Splitting data into {self.batch_split} microbatches")
                 batch_size = list(data.values())[0].shape[0]
                 data_list = [
                     {k: v[i * batch_size // self.batch_split:(i + 1) * batch_size // self.batch_split] for k, v in data.items()}
                     for i in range(self.batch_split)
                 ]
-                print(f"Step {self.step}: load_data - Data successfully split into {len(data_list)} microbatches")
+                # print(f"Step {self.step}: load_data - Data successfully split into {len(data_list)} microbatches")
         elif isinstance(data, list):
-            print(f"Step {self.step}: load_data - Data is already a list of {len(data)} items")
+            # print(f"Step {self.step}: load_data - Data is already a list of {len(data)} items")
             data_list = data
         else:
-            print(f"Step {self.step}: load_data - ERROR: Data type {type(data)} not supported")
+            # print(f"Step {self.step}: load_data - ERROR: Data type {type(data)} not supported")
             raise ValueError('Data must be a dict or a list of dicts.')
         
-        print(f"Step {self.step}: load_data - Returning data list with {len(data_list)} items")
+        # print(f"Step {self.step}: load_data - Returning data list with {len(data_list)} items")
         return data_list
 
     @abstractmethod
