@@ -345,7 +345,7 @@ class Trainer:
         print("snapshot_dataset completed")
 
     @torch.no_grad()
-    def snapshot(self, suffix=None, num_samples=64, batch_size=4, verbose=False):
+    def snapshot(self, suffix=None, num_samples=64, batch_size=4, verbose=False, index=0):
         """
         Sample images from the model and save to disk.
         
@@ -360,66 +360,85 @@ class Trainer:
             
         Note: This function should be called by all processes in distributed training.
         """
+        # Print status message from the master process only
         if self.is_master:
             print(f'\nSampling {num_samples} images...', end='')
 
+        # Set default suffix to current step if none provided (used for organizing output files)
         if suffix is None:
             suffix = f'step{self.step:07d}'
 
-        # Assign tasks to processes for parallel generation
+        # Calculate how many samples each process should generate in distributed setting
         num_samples_per_process = int(np.ceil(num_samples / self.world_size))
+        # Generate samples using the model's snapshot implementation
         samples = self.run_snapshot(num_samples_per_process, batch_size=batch_size, verbose=verbose)
 
-        # Preprocess images for visualization
+        # Process the generated samples for visualization
         for key in list(samples.keys()):
             if samples[key]['type'] == 'sample':
+                # Convert raw samples to visualizable format using the dataset's visualization method
                 vis = self.visualize_sample(samples[key]['value'])
                 if isinstance(vis, dict):
+                    # If visualization returns a dictionary, create multiple entries with different visualizations
                     for k, v in vis.items():
                         samples[f'{key}_{k}'] = {'value': v, 'type': 'image'}
+                    # Remove the original entry since it's been replaced with specific visualizations
                     del samples[key]
                 else:
+                    # Otherwise, update the existing entry by replacing with visualization
                     samples[key] = {'value': vis, 'type': 'image'}
 
-        # Gather results from all processes
+        # Gather samples from all processes in distributed training setup
         if self.world_size > 1:
             for key in samples.keys():
+                # Ensure tensor is contiguous in memory for efficient gathering operation
                 samples[key]['value'] = samples[key]['value'].contiguous()
                 if self.is_master:
+                    # Create buffers on master process to receive data from all processes
                     all_images = [torch.empty_like(samples[key]['value']) for _ in range(self.world_size)]
                 else:
+                    # Non-master processes don't need to allocate receive buffers
                     all_images = []
+                # Gather data from all processes to the master (rank 0)
                 dist.gather(samples[key]['value'], all_images, dst=0)
                 if self.is_master:
+                    # Concatenate all gathered samples and limit to requested number
                     samples[key]['value'] = torch.cat(all_images, dim=0)[:num_samples]
 
-        # Save images to disk (master process only)
+        # Save images to disk (only on master process)
         if self.is_master:
+            # Create output directory for current snapshot
             os.makedirs(os.path.join(self.output_dir, 'samples', suffix), exist_ok=True)
             for key in samples.keys():
                 if samples[key]['type'] == 'image':
+                    # Save image samples using torchvision utilities
                     utils.save_image(
                         samples[key]['value'],
-                        os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}.jpg'),
-                        nrow=int(np.sqrt(num_samples)),
+                        os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}_{index}.jpg'),
+                        nrow=int(np.sqrt(num_samples)),  # Arrange images in a square grid
                         normalize=True,
-                        value_range=self.dataset.value_range,
+                        value_range=self.dataset.value_range,  # Use dataset's specified value range for normalization
                     )
                 elif samples[key]['type'] == 'number':
+                    # Process and save numerical samples as images with annotations
                     min = samples[key]['value'].min()
                     max = samples[key]['value'].max()
+                    # Normalize values to [0, 1] range for visualization
                     images = (samples[key]['value'] - min) / (max - min)
+                    # Create a grid of images
                     images = utils.make_grid(
                         images,
                         nrow=int(np.sqrt(num_samples)),
-                        normalize=False,
+                        normalize=False,  # Already normalized above
                     )
+                    # Save the image with min/max annotations for reference
                     save_image_with_notes(
                         images,
-                        os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}.jpg'),
+                        os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}_{index}.jpg'),
                         notes=f'{key} min: {min}, max: {max}',
                     )
 
+        # Print completion message (master process only)
         if self.is_master:
             print(' Done.')
 
@@ -544,9 +563,9 @@ class Trainer:
             print('\nStarting training...')
             self.snapshot_dataset()
         if self.step == 0:
-            self.snapshot(suffix='init')
+            self.snapshot(suffix='init',index=0)
         else: # resume
-            self.snapshot(suffix=f'resume_step{self.step:07d}')
+            self.snapshot(suffix=f'resume_step{self.step:07d}',index=self.step)
 
         log = []
         time_last_print = 0.0
@@ -595,7 +614,7 @@ class Trainer:
 
             # Generate and save sample images at regular intervals
             if self.step % self.i_sample == 0:
-                self.snapshot()
+                self.snapshot(index=self.step)
 
             # Handle logging on master process
             if self.is_master:
@@ -643,7 +662,7 @@ class Trainer:
             pbar.close()
             
             # Final steps after training is complete
-            self.snapshot(suffix='final')
+            self.snapshot(suffix='final',index=self.step)
             self.writer.close()
             print('Training finished.')
             

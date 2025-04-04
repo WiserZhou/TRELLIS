@@ -39,7 +39,6 @@ pipeline.cuda()
 
 #     save_outputs(outputs, filename_prefix=f"sample_image_{i+1}", save_video=True, save_glb=False)
 
-
 image = Image.open("/mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts/renders/a36a48897cc62006f0b49bc12d30cd38f28c83704feb203815365405247295ee/0027.webp") # image to be rendered
 
 # Run the pipeline
@@ -57,4 +56,4 @@ outputs = pipeline.run(
     # },
 )
 
-save_outputs(outputs, filename_prefix=f"sample_image_{i+1}", save_video=True, save_glb=False)
+save_outputs(outputs, filename_prefix=f"sample_image_model", save_video=True, save_glb=True)
