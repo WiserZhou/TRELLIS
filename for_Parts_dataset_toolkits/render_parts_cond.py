@@ -36,7 +36,7 @@ from functools import partial
 import numpy as np
 
 
-def get_cameras(initialization_output):
+def get_four_cameras(initialization_output, num_views):
     """
     Get camera specifications for rendering from different viewpoints
     
@@ -82,7 +82,44 @@ def get_cameras(initialization_output):
         
     return cameras
 
-def _render_cond(file_path, sha256, output_dir):
+def get_sphere_cameras(initialization_output, num_views):
+
+    from utils import sphere_hammersley_sequence
+    from vrenderer.spec import CameraSpec
+    from vrenderer.ops import polar_to_transform_matrix
+    import math
+    # Calculate camera field of view
+    default_camera_lens = 50
+    default_camera_sensor_width = 36
+    camera_angle_x = 2.0*math.atan(default_camera_sensor_width/2/default_camera_lens)
+    fov_deg = math.degrees(camera_angle_x)
+    
+    # Calculate camera distance based on model bounding box
+    bbox_size = np.array(initialization_output.normalization_spec.bbox_max) - np.array(initialization_output.normalization_spec.bbox_min)
+    ratio = 1.0
+    distance = ratio * default_camera_lens / default_camera_sensor_width * \
+        math.sqrt(bbox_size[0]**2 + bbox_size[1]**2+bbox_size[2]**2)
+    
+    # Generate camera positions using Hammersley sequence
+    cameras = []
+    offset = (np.random.rand(), np.random.rand())
+    for i in range(num_views):
+        yaw, pitch = sphere_hammersley_sequence(i, num_views, offset)
+        
+        # Convert yaw/pitch to elevation/azimuth angles
+        elevation = math.degrees(pitch)
+        azimuth = math.degrees(yaw)
+        
+        cameras.append(CameraSpec(
+            projection_type="PERSP",
+            transform_matrix=polar_to_transform_matrix(elevation, azimuth, distance),
+            fov_deg=fov_deg,
+        ))
+
+    return cameras
+    
+
+def _render_cond(file_path, sha256, output_dir, num_views=24):
     """
     Render a 3D model for conditioning purposes using vrenderer.
     
@@ -183,7 +220,7 @@ def _render_cond(file_path, sha256, output_dir):
         # Initialize the renderer with just this part visible
         initialization_output = initialize(initialization_settings, part_names=[name])
         # Get camera positions for multiple viewpoints
-        cameras = get_cameras(initialization_output)
+        cameras = get_four_cameras(initialization_output, num_views)
         # Perform the actual rendering and save the results
         render_outputs = render_and_save(
             settings=runtime_settings,
@@ -224,6 +261,8 @@ if __name__ == '__main__':
                         help='Filter objects with aesthetic score lower than this value')
     parser.add_argument('--instances', type=str, default=None,
                         help='Instances to process')
+    parser.add_argument('--num_views', type=int, default=24,
+                        help='Number of views to render')
     dataset_utils.add_args(parser)
     parser.add_argument('--rank', type=int, default=0)
     parser.add_argument('--world_size', type=int, default=1)
@@ -270,7 +309,7 @@ if __name__ == '__main__':
     print(f'Processing {len(metadata)} objects...')
 
     # Process objects in parallel
-    func = partial(_render_cond, output_dir=opt.output_dir)
+    func = partial(_render_cond, output_dir=opt.output_dir, num_views=opt.num_views)
     cond_rendered = dataset_utils.foreach_instance(metadata, opt.output_dir, func, max_workers=opt.max_workers, desc='Rendering objects')
     cond_rendered = pd.concat([cond_rendered, pd.DataFrame.from_records(records)])
     

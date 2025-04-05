@@ -31,6 +31,6 @@ python for_Parts_dataset_toolkits/build_metadata.py Parts --output_dir datasets/
 
 
 # render pip
-pip install pandas easydict bpy tqdm 
+pip install pandas easydict bpy tqdm trimesh
 
 /mnt/pfs/users/yangyunhan/blender-4.0.0-linux-x64/blender -b -P for_Parts_dataset_toolkits/render_parts_cond.py Parts --output_dir datasets/Parts

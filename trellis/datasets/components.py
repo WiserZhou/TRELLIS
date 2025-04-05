@@ -213,8 +213,9 @@ class ImageConditionedMixin:
         Returns:
             Dict[str, Any]: Dictionary with instance data plus image as 'cond'
         """
+        # Call the second father class from MRO sequence to get the base instance
         pack = super().get_instance(root, instance)
-       
+
         # Load conditional image metadata
         image_root = os.path.join(root, 'renders_cond', instance)
         with open(os.path.join(image_root, 'transforms.json')) as f:
@@ -261,5 +262,5 @@ class ImageConditionedMixin:
         # Apply alpha compositing
         image = image * alpha.unsqueeze(0)
         pack['cond'] = image
-       
+
         return pack
