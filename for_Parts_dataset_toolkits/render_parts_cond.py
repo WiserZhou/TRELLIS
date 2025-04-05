@@ -22,20 +22,19 @@ import os
 import json
 import copy
 import sys
+sys.path.append(os.path.abspath("."))
+# if os.environ.get("USE_PIP_BLENDER"):
+#     from argparse import ArgumentParser
+# else:
+#     from vrenderer.blender_utils import BlenderArgumentParser as ArgumentParser
+from argparse import ArgumentParser
+
 import importlib
-import argparse
 import pandas as pd
 from easydict import EasyDict as edict
 from functools import partial
 import numpy as np
-import math
 
-from vrenderer.render import initialize, render_and_save
-from vrenderer.spec import InitializationSettings, RuntimeSettings, CameraSpec
-from vrenderer.ops import polar_to_transform_matrix
-
-import bpy
-from mathutils import Vector
 
 def get_cameras(initialization_output):
     """
@@ -47,6 +46,9 @@ def get_cameras(initialization_output):
     Returns:
         List of CameraSpec objects representing different camera viewpoints
     """
+    from vrenderer.spec import CameraSpec
+    from vrenderer.ops import polar_to_transform_matrix
+    import math
     # Calculate camera field of view from lens and sensor parameters
     # Standard values for a 35mm camera
     default_camera_lens = 50
@@ -92,20 +94,35 @@ def _render_cond(file_path, sha256, output_dir):
     Returns:
         Dictionary with rendering results containing status information
     """
-    
+    from vrenderer.render import initialize, render_and_save
+    from vrenderer.spec import InitializationSettings, RuntimeSettings
+    import math
+
+    import bpy
+    from mathutils import Vector
+
+    # Ensure the proper GLB import process
+    # bpy.ops.import_scene.gltf(filepath='/mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts/raw/Parts/A/ab9804f981184f8db6f1f814c2b8c169.glb')
     # Create output directory using the model's hash as identifier
     output_folder = os.path.join(output_dir, 'renders_cond', sha256)
     os.makedirs(output_folder, exist_ok=True)
+    # 获取当前脚本文件的路径
+    current_file_path = __file__
+    # 获取当前文件的父目录
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(current_file_path)))
+    file_path = os.path.join(parent_dir, file_path)
+    # print(parent_dir)
+    # print(file_path)
     
     # Initialize model settings with normalized scale and merged vertices
     # Normalizing scale ensures consistent rendering across differently sized models
     initialization_settings = InitializationSettings(
-        file_path=os.path.expanduser(file_path),
+        file_path=file_path,
         merge_vertices=True, 
         normalizing_scale=0.5
     )
     initialization_output = initialize(initialization_settings)
-    
+    # print("Initialization completed")
     # Configure render settings
     # Using EEVEE renderer for a good balance between quality and speed
     runtime_settings = RuntimeSettings(
@@ -122,9 +139,6 @@ def _render_cond(file_path, sha256, output_dir):
         blend_mode="OPAQUE"
     )
 
-    # Get camera positions for multiple viewpoints
-    cameras = get_cameras(initialization_output)
-    
     # Helper function to get object's Z-center position
     # obj.bound_box has 8 corners in local space
     # obj.matrix_world is the transformation matrix from local to world space
@@ -143,8 +157,10 @@ def _render_cond(file_path, sha256, output_dir):
         
     # Hide all mesh objects initially
     # We'll show them one by one for individual rendering
+    # print("Hide all objects")
     for obj in bpy.data.objects:
         if obj.type == 'MESH':
+            # print("Hide object: " + obj.name)
             obj.hide_render = True
     
     # Create a list to store object names in order
@@ -152,18 +168,22 @@ def _render_cond(file_path, sha256, output_dir):
     # Collect names of each part
     for i in range(len(sorted_indices)):
         obj = objects[sorted_indices[i]]
+        # print("Render object " + str(i) + ": " + obj.name)
         obj_name_list.append(obj.name)
     
     # Create transforms.json file structure to store camera parameters
     transforms = {
         "frames": []
     }
-    
+
     # Render each part separately
     for i, name in enumerate(obj_name_list):
+
+        # print(f"Rendering part {i+1}/{len(obj_name_list)}: {name}")
         # Initialize the renderer with just this part visible
         initialization_output = initialize(initialization_settings, part_names=[name])
-
+        # Get camera positions for multiple viewpoints
+        cameras = get_cameras(initialization_output)
         # Perform the actual rendering and save the results
         render_outputs = render_and_save(
             settings=runtime_settings,
@@ -192,13 +212,12 @@ def _render_cond(file_path, sha256, output_dir):
         return {'sha256': sha256, 'cond_rendered': True}
     return {'sha256': sha256, 'cond_rendered': False}
 
-
 if __name__ == '__main__':
     # Import dataset-specific utilities based on command line argument
     dataset_utils = importlib.import_module(f'datasets.{sys.argv[1]}')
 
     # Set up command line argument parser
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParser()
     parser.add_argument('--output_dir', type=str, required=True,
                         help='Directory to save the metadata')
     parser.add_argument('--filter_low_aesthetic_score', type=float, default=None,

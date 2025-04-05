@@ -63,6 +63,7 @@ def process(model_path, save_dir):
         model_path: Path to input 3D model file (.glb)
         save_dir: Directory to save rendered images
     """
+    print(bpy.context.object)
     # Initialize model settings with normalized scale and merged vertices
     initialization_settings = InitializationSettings(
         file_path=model_path,
@@ -208,7 +209,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Define paths for model storage and processing
-    model_root = "/mnt/pfs/users/yangyunhan/yufan/data/raw"  # Root directory for storing 3D models
+    model_root = "/mnt/pfs/users/yangyunhan/yufan/data/raw/Parts/A"  # Root directory for storing 3D models
     
     # Download the 3D model from Objaverse using the provided ID
     uid = args.o

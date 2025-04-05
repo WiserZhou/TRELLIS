@@ -881,6 +881,10 @@ def normalize(
     
     # Create empty object to serve as parent for all scene objects
     bpy.ops.object.empty_add(type='PLAIN_AXES')
+    print("Empty object created")
+    for item in dir(bpy.context):
+        print(item)
+    print(bpy.context.object)
     root_object = bpy.context.object
     
     # Parent all root objects to the empty while preserving their world transforms

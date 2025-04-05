@@ -22,10 +22,6 @@ from functools import partial
 import numpy as np
 from utils import sphere_hammersley_sequence
 
-from vrenderer.render import initialize, render_and_save
-from vrenderer.spec import InitializationSettings, RuntimeSettings, CameraSpec
-from vrenderer.ops import polar_to_transform_matrix
-import math
 
 def _render(file_path, sha256, output_dir, num_views):
     """
@@ -40,13 +36,23 @@ def _render(file_path, sha256, output_dir, num_views):
     Returns:
         Dictionary with rendering results
     """
-    
+    from vrenderer.render import initialize, render_and_save
+    from vrenderer.spec import InitializationSettings, RuntimeSettings, CameraSpec
+    from vrenderer.ops import polar_to_transform_matrix
+    import math
     output_folder = os.path.join(output_dir, 'renders', sha256)
     os.makedirs(output_folder, exist_ok=True)
+    # 获取当前脚本文件的路径
+    current_file_path = __file__
+    # 获取当前文件的父目录
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(current_file_path)))
+    file_path = os.path.join(parent_dir, file_path)
+    # print(parent_dir)
+    # print(file_path)
     
     # Initialize model settings with normalized scale and merged vertices
     initialization_settings = InitializationSettings(
-        file_path=os.path.expanduser(file_path),
+        file_path=file_path,
         merge_vertices=True, 
         normalizing_scale=0.5
     )
