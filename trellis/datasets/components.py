@@ -196,7 +196,55 @@ class ImageConditionedMixin:
         stats['Cond rendered'] = len(metadata)  # Record count of instances with conditional renders
         return metadata, stats
     
-    def get_instance(self, root, instance):
+    def process_image(self, image_path):
+        """
+        Process a conditional image by cropping to subject, resizing, and handling transparency.
+        
+        Args:
+            image_path (str): Path to the input image file
+            
+        Returns:
+            torch.Tensor: Processed image tensor with alpha compositing applied
+        """
+        # Load the image with transparency (RGBA format)
+        image = Image.open(image_path)
+        
+        # Calculate bounding box using alpha channel to identify the object boundaries
+        # This centers the crop around the actual object, ignoring transparent areas
+        alpha = np.array(image.getchannel(3))
+        bbox = np.array(alpha).nonzero()  # Get coordinates of non-transparent pixels
+        bbox = [bbox[1].min(), bbox[0].min(), bbox[1].max(), bbox[0].max()]  # [left, top, right, bottom]
+        center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]  # Calculate object center point
+        
+        # Calculate padding dimensions to provide context around the object
+        hsize = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / 2  # Half of the larger dimension
+        aug_size_ratio = 1.2  # Augmentation factor - add 20% padding around the object
+        aug_hsize = hsize * aug_size_ratio  # Apply the augmentation ratio to the half-size
+        aug_center_offset = [0, 0]  # No offset from center in this implementation
+        aug_center = [center[0] + aug_center_offset[0], center[1] + aug_center_offset[1]]  # Final center point
+        
+        # Calculate and apply the augmented bounding box for cropping
+        aug_bbox = [int(aug_center[0] - aug_hsize), int(aug_center[1] - aug_hsize), 
+                   int(aug_center[0] + aug_hsize), int(aug_center[1] + aug_hsize)]
+        image = image.crop(aug_bbox)  # Crop to the augmented bounding box
+
+        # Resize the image to the target size using high-quality Lanczos resampling
+        image = image.resize((self.image_size, self.image_size), Image.Resampling.LANCZOS)
+        
+        # Separate alpha channel for later compositing
+        alpha = image.getchannel(3)  # Extract alpha channel (transparency information)
+        image = image.convert('RGB')  # Convert to RGB format (remove alpha channel)
+        
+        # Convert image data to PyTorch tensors and normalize to [0,1] range
+        image = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0  # [C,H,W] format
+        alpha = torch.tensor(np.array(alpha)).float() / 255.0  # Alpha as a separate tensor
+        
+        # Apply alpha compositing - multiply RGB channels by alpha to make transparent areas black
+        image = image * alpha.unsqueeze(0)  # Broadcasting alpha across all channels
+
+        return image
+    
+    def get_instance(self, root, instance, select_method='part'):
         """
         Extends the base get_instance method to include a processed conditional image.
         
@@ -221,46 +269,38 @@ class ImageConditionedMixin:
         with open(os.path.join(image_root, 'transforms.json')) as f:
             metadata = json.load(f)
         
-        # Select a random view from available frames
-        n_views = len(metadata['frames'])
-        view = np.random.randint(n_views)
-        metadata = metadata['frames'][view]
+        if select_method == 'random':
+            # Select a random view from available frames
+            n_views = len(metadata['frames'])
+            view = np.random.randint(n_views)
 
-        # Load the image from the selected view
-        image_path = os.path.join(image_root, metadata['file_path'])
-        image = Image.open(image_path)  # Opens RGBA image
+            metadata = metadata['frames'][view]
+                # Load the image from the selected view
+            image_path = os.path.join(image_root, metadata['file_path'])
 
-        # Calculate bounding box from alpha channel to center the object
-        alpha = np.array(image.getchannel(3))
-        bbox = np.array(alpha).nonzero()
-        bbox = [bbox[1].min(), bbox[0].min(), bbox[1].max(), bbox[0].max()]
-        center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
-        
-        # Calculate padding for augmentation
-        hsize = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / 2
-        aug_size_ratio = 1.2  # Add 20% padding around the object
-        aug_hsize = hsize * aug_size_ratio
-        aug_center_offset = [0, 0]  # No offset from center
-        aug_center = [center[0] + aug_center_offset[0], center[1] + aug_center_offset[1]]
-        
-        # Crop image to the augmented bounding box
-        aug_bbox = [int(aug_center[0] - aug_hsize), int(aug_center[1] - aug_hsize), 
-                   int(aug_center[0] + aug_hsize), int(aug_center[1] + aug_hsize)]
-        image = image.crop(aug_bbox)
+            image = self.process_image(image_path)  # Process the image
 
-        # Resize image to target size
-        image = image.resize((self.image_size, self.image_size), Image.Resampling.LANCZOS)
+            pack['cond'] = image
+
+        elif select_method == 'part':
+            
+            image_list = []
+            split_index = [i for i in range(0, len(metadata['frames']), 4)]
+
+            # Randomly select 3 indices from split_index
+            selected_indices = np.random.choice(split_index, 3, replace=False)
+
+            for i, index in enumerate(selected_indices):
+                index = index + np.random.randint(4)
+            
+                metadata = metadata['frames'][index]
+                image_path = os.path.join(image_root, metadata['file_path'])
+                image = self.process_image(image_path)  # Process the image
+                image_list.append(image)
+            
+            pack['cond'] = image_list
         
-        # Extract alpha channel and convert image to RGB
-        alpha = image.getchannel(3)
-        image = image.convert('RGB')
-        
-        # Convert to PyTorch tensors and normalize
-        image = torch.tensor(np.array(image)).permute(2, 0, 1).float() / 255.0
-        alpha = torch.tensor(np.array(alpha)).float() / 255.0
-        
-        # Apply alpha compositing
-        image = image * alpha.unsqueeze(0)
-        pack['cond'] = image
+        else:
+            raise ValueError("Invalid select_method. Use 'random' or 'part'.")
 
         return pack
