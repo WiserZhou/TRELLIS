@@ -95,18 +95,24 @@ class ImageConditionedMixin:
         if isinstance(image, torch.Tensor):
             assert image.ndim == 4, "Image tensor should be batched (B, C, H, W)"
         elif isinstance(image, list):
-            assert all(isinstance(i, Image.Image) for i in image), "Image list should be list of PIL images"
-            # Resize all images to 518x518 pixels using high-quality LANCZOS resampling
-            image = [i.resize((518, 518), Image.LANCZOS) for i in image]
+            if all(isinstance(i, Image.Image) for i in image): 
+                # assert all(isinstance(i, Image.Image) for i in image), "Image list should be list of PIL images"
+                # Resize all images to 518x518 pixels using high-quality LANCZOS resampling
+                image = [i.resize((518, 518), Image.LANCZOS) for i in image]
 
-            # Convert images to RGB, transform to numpy arrays, convert to float32, and normalize pixel values to range [0,1]
-            image = [np.array(i.convert('RGB')).astype(np.float32) / 255 for i in image]
+                # Convert images to RGB, transform to numpy arrays, convert to float32, and normalize pixel values to range [0,1]
+                image = [np.array(i.convert('RGB')).astype(np.float32) / 255 for i in image]
 
-            # Convert numpy arrays to PyTorch tensors and rearrange dimensions from (H,W,C) to (C,H,W) format required by PyTorch
-            image = [torch.from_numpy(i).permute(2, 0, 1).float() for i in image]
+                # Convert numpy arrays to PyTorch tensors and rearrange dimensions from (H,W,C) to (C,H,W) format required by PyTorch
+                image = [torch.from_numpy(i).permute(2, 0, 1).float() for i in image]
 
-            # Stack individual tensors into a batch and move to GPU for faster processing
-            image = torch.stack(image).cuda()
+                # Stack individual tensors into a batch and move to GPU for faster processing
+                image = torch.stack(image).cuda()
+            elif all(isinstance(i, torch.Tensor) for i in image):
+                # Stack individual tensors into a batch and move to GPU for faster processing
+                image = torch.stack(image).cuda()
+            else:
+                raise ValueError("Image list should be either list of PIL images or list of tensors")
         else:
             raise ValueError(f"Unsupported type of image: {type(image)}")
         

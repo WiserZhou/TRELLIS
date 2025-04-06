@@ -1,3 +1,16 @@
+"""
+Mesh Decoder Module for Structured Latent VAE
+
+This file implements a mesh-based decoder for the structured latent variational autoencoder (SLAT VAE).
+It contains specialized sparse neural network components that transform latent representations into 
+3D mesh structures through a series of sparse convolutions and subdivisions.
+
+The module implements:
+1. SparseSubdivideBlock3d - A block that subdivides sparse tensors to increase resolution
+2. SLatMeshDecoder - Main decoder that transforms latent codes into 3D meshes
+3. ElasticSLatMeshDecoder - Memory-efficient version for low VRAM environments
+"""
+
 from typing import *
 import torch
 import torch.nn as nn
@@ -15,8 +28,12 @@ class SparseSubdivideBlock3d(nn.Module):
     """
     A 3D subdivide block that can subdivide the sparse tensor.
 
+    This block increases the resolution of sparse tensors by a factor of 2,
+    and optionally changes the number of channels.
+
     Args:
         channels: channels in the inputs and outputs.
+        resolution: the current resolution of the sparse tensor.
         out_channels: if specified, the number of output channels.
         num_groups: the number of groups for the group norm.
     """
@@ -33,13 +50,16 @@ class SparseSubdivideBlock3d(nn.Module):
         self.out_resolution = resolution * 2
         self.out_channels = out_channels or channels
 
+        # Normalization and activation before subdivision
         self.act_layers = nn.Sequential(
             sp.SparseGroupNorm32(num_groups, channels),
             sp.SparseSiLU()
         )
         
+        # Subdivision operator that doubles the resolution
         self.sub = sp.SparseSubdivide()
         
+        # Post-subdivision processing with residual connection
         self.out_layers = nn.Sequential(
             sp.SparseConv3d(channels, self.out_channels, 3, indice_key=f"res_{self.out_resolution}"),
             sp.SparseGroupNorm32(num_groups, self.out_channels),
@@ -47,6 +67,7 @@ class SparseSubdivideBlock3d(nn.Module):
             zero_module(sp.SparseConv3d(self.out_channels, self.out_channels, 3, indice_key=f"res_{self.out_resolution}")),
         )
         
+        # Skip connection that handles potential channel dimension changes
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
         else:
@@ -59,17 +80,23 @@ class SparseSubdivideBlock3d(nn.Module):
         Args:
             x: an [N x C x ...] Tensor of features.
         Returns:
-            an [N x C x ...] Tensor of outputs.
+            an [N x C x ...] Tensor of outputs with doubled resolution.
         """
         h = self.act_layers(x)
-        h = self.sub(h)
-        x = self.sub(x)
+        h = self.sub(h)  # Double the resolution
+        x = self.sub(x)  # Also subdivide the input for skip connection
         h = self.out_layers(h)
-        h = h + self.skip_connection(x)
+        h = h + self.skip_connection(x)  # Add skip connection
         return h
 
 
 class SLatMeshDecoder(SparseTransformerBase):
+    """
+    Structured Latent Mesh Decoder that transforms latent codes into 3D meshes.
+    
+    Uses sparse transformers followed by upsampling blocks to generate high-resolution
+    features that are then converted to meshes.
+    """
     def __init__(
         self,
         resolution: int,
@@ -87,6 +114,7 @@ class SLatMeshDecoder(SparseTransformerBase):
         qk_rms_norm: bool = False,
         representation_config: dict = None,
     ):
+        # Initialize the transformer backbone
         super().__init__(
             in_channels=latent_channels,
             model_channels=model_channels,
@@ -103,8 +131,12 @@ class SLatMeshDecoder(SparseTransformerBase):
         )
         self.resolution = resolution
         self.rep_config = representation_config
+        
+        # Mesh extractor to convert features to mesh representation
         self.mesh_extractor = SparseFeatures2Mesh(res=self.resolution*4, use_color=self.rep_config.get('use_color', False))
         self.out_channels = self.mesh_extractor.feats_channels
+        
+        # Upsampling blocks that progressively increase resolution
         self.upsample = nn.ModuleList([
             SparseSubdivideBlock3d(
                 channels=model_channels,
@@ -117,6 +149,8 @@ class SLatMeshDecoder(SparseTransformerBase):
                 out_channels=model_channels // 8
             )
         ])
+        
+        # Final layer to map features to mesh attributes
         self.out_layer = sp.SparseLinear(model_channels // 8, self.out_channels)
 
         self.initialize_weights()
@@ -124,34 +158,35 @@ class SLatMeshDecoder(SparseTransformerBase):
             self.convert_to_fp16()
 
     def initialize_weights(self) -> None:
+        """Initialize model weights, with special handling for output layers."""
         super().initialize_weights()
-        # Zero-out output layers:
+        # Zero-out output layers for stable training
         nn.init.constant_(self.out_layer.weight, 0)
         nn.init.constant_(self.out_layer.bias, 0)
 
     def convert_to_fp16(self) -> None:
         """
-        Convert the torso of the model to float16.
+        Convert the torso of the model to float16 for memory efficiency.
         """
         super().convert_to_fp16()
         self.upsample.apply(convert_module_to_f16)
 
     def convert_to_fp32(self) -> None:
         """
-        Convert the torso of the model to float32.
+        Convert the torso of the model back to float32 for precision.
         """
         super().convert_to_fp32()
         self.upsample.apply(convert_module_to_f32)  
     
     def to_representation(self, x: sp.SparseTensor) -> List[MeshExtractResult]:
         """
-        Convert a batch of network outputs to 3D representations.
+        Convert a batch of network outputs to 3D mesh representations.
 
         Args:
             x: The [N x * x C] sparse tensor output by the network.
 
         Returns:
-            list of representations
+            list of mesh representation results, one per batch item
         """
         ret = []
         for i in range(x.shape[0]):
@@ -160,17 +195,28 @@ class SLatMeshDecoder(SparseTransformerBase):
         return ret
 
     def forward(self, x: sp.SparseTensor) -> List[MeshExtractResult]:
-        h = super().forward(x)
+        """
+        Process latent codes through the decoder and extract meshes.
+        
+        Args:
+            x: Input sparse tensor of latent codes
+            
+        Returns:
+            List of extracted mesh representations
+        """
+        h = super().forward(x)  # Process through transformer blocks
         for block in self.upsample:
-            h = block(h)
+            h = block(h)  # Progressively increase resolution
         h = h.type(x.dtype)
-        h = self.out_layer(h)
-        return self.to_representation(h)
+        h = self.out_layer(h)  # Final projection to mesh features
+        return self.to_representation(h)  # Convert features to meshes
     
 
 class ElasticSLatMeshDecoder(SparseTransformerElasticMixin, SLatMeshDecoder):
     """
-    Slat VAE Mesh decoder with elastic memory management.
-    Used for training with low VRAM.
+    Structured Latent Mesh Decoder with elastic memory management.
+    
+    This variant uses elastic sparse tensor operations to reduce memory usage
+    during training, making it suitable for environments with limited VRAM.
     """
     pass
