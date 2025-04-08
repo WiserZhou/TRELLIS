@@ -282,47 +282,6 @@ class BasicTrainer(Trainer):
         if self.world_size > 1:
             self.check_ddp()
 
-    def save(self):
-        """
-        Save a checkpoint.
-        Should be called only by the rank 0 process.
-        
-        This method saves model parameters, optimizer state, and other training state
-        to checkpoint files for later resumption of training.
-        """
-        assert self.is_master, 'save() should be called only by the rank 0 process.'
-        print(f'\nSaving checkpoint at step {self.step}...', end='')
-        
-        # Save models
-        model_ckpts = self._master_params_to_state_dicts(self.master_params)
-        for name, model_ckpt in model_ckpts.items():
-            torch.save(model_ckpt, os.path.join(self.output_dir, 'ckpts', f'{name}_step{self.step:07d}.pt'))
-        
-        # Save EMA parameters
-        for i, ema_rate in enumerate(self.ema_rate):
-            ema_ckpts = self._master_params_to_state_dicts(self.ema_params[i])
-            for name, ema_ckpt in ema_ckpts.items():
-                torch.save(ema_ckpt, os.path.join(self.output_dir, 'ckpts', f'{name}_ema{ema_rate}_step{self.step:07d}.pt'))
-
-        # Save miscellaneous state (optimizer, step, etc.)
-        misc_ckpt = {
-            'optimizer': self.optimizer.state_dict(),
-            'step': self.step,
-            'data_sampler': self.data_sampler.state_dict(),
-        }
-        if self.fp16_mode == 'amp':
-            misc_ckpt['scaler'] = self.scaler.state_dict()
-        elif self.fp16_mode == 'inflat_all':
-            misc_ckpt['log_scale'] = self.log_scale
-        if self.lr_scheduler_config is not None:
-            misc_ckpt['lr_scheduler'] = self.lr_scheduler.state_dict()
-        if self.elastic_controller_config is not None:
-            misc_ckpt['elastic_controller'] = self.elastic_controller.state_dict()
-        if self.grad_clip is not None and not isinstance(self.grad_clip, float):
-            misc_ckpt['grad_clip'] = self.grad_clip.state_dict()
-        torch.save(misc_ckpt, os.path.join(self.output_dir, 'ckpts', f'misc_step{self.step:07d}.pt'))
-        print(' Done.')
-
     def finetune_from(self, finetune_ckpt):
         """
         Finetune from a checkpoint.
@@ -374,6 +333,47 @@ class BasicTrainer(Trainer):
         # Verify that DDP is working correctly
         if self.world_size > 1:
             self.check_ddp()
+
+    def save(self):
+        """
+        Save a checkpoint.
+        Should be called only by the rank 0 process.
+        
+        This method saves model parameters, optimizer state, and other training state
+        to checkpoint files for later resumption of training.
+        """
+        assert self.is_master, 'save() should be called only by the rank 0 process.'
+        print(f'\nSaving checkpoint at step {self.step}...', end='')
+        
+        # Save models
+        model_ckpts = self._master_params_to_state_dicts(self.master_params)
+        for name, model_ckpt in model_ckpts.items():
+            torch.save(model_ckpt, os.path.join(self.output_dir, 'ckpts', f'{name}_step{self.step:07d}.pt'))
+        
+        # Save EMA parameters
+        for i, ema_rate in enumerate(self.ema_rate):
+            ema_ckpts = self._master_params_to_state_dicts(self.ema_params[i])
+            for name, ema_ckpt in ema_ckpts.items():
+                torch.save(ema_ckpt, os.path.join(self.output_dir, 'ckpts', f'{name}_ema{ema_rate}_step{self.step:07d}.pt'))
+
+        # Save miscellaneous state (optimizer, step, etc.)
+        misc_ckpt = {
+            'optimizer': self.optimizer.state_dict(),
+            'step': self.step,
+            'data_sampler': self.data_sampler.state_dict(),
+        }
+        if self.fp16_mode == 'amp':
+            misc_ckpt['scaler'] = self.scaler.state_dict()
+        elif self.fp16_mode == 'inflat_all':
+            misc_ckpt['log_scale'] = self.log_scale
+        if self.lr_scheduler_config is not None:
+            misc_ckpt['lr_scheduler'] = self.lr_scheduler.state_dict()
+        if self.elastic_controller_config is not None:
+            misc_ckpt['elastic_controller'] = self.elastic_controller.state_dict()
+        if self.grad_clip is not None and not isinstance(self.grad_clip, float):
+            misc_ckpt['grad_clip'] = self.grad_clip.state_dict()
+        torch.save(misc_ckpt, os.path.join(self.output_dir, 'ckpts', f'misc_step{self.step:07d}.pt'))
+        print(' Done.')
 
     def update_ema(self):
         """

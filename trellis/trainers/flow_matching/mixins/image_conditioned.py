@@ -141,12 +141,13 @@ class ImageConditionedMixin:
         # print(f"shape of patchtokens: {patchtokens.shape}") # shape of patchtokens: torch.Size([4, 4122, 1024])
         # raise ValueError(f"Unsupported type of image: {type(image)}")
         return patchtokens
-# shape of patchtokens: torch.Size([3, 1374, 1024])
-# shape of patchtokens: torch.Size([3, 1374, 1024])
-# shape of patchtokens: torch.Size([3, 1374, 1024])
-# shape of patchtokens: torch.Size([3, 1374, 1024])
-# shape of patchtoken_list: 4
-# shape of patchtokens: torch.Size([3, 5496, 1024])
+        # shape of patchtokens: torch.Size([3, 1374, 1024])
+        # shape of patchtokens: torch.Size([3, 1374, 1024])
+        # shape of patchtokens: torch.Size([3, 1374, 1024])
+        # shape of patchtokens: torch.Size([3, 1374, 1024])
+        # shape of patchtoken_list: 4
+        # shape of patchtokens: torch.Size([3, 5496, 1024])
+        
     def get_cond(self, cond, **kwargs):
         """
         Get the conditioning data for training.

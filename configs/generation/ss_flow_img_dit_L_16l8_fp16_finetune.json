@@ -65,7 +65,7 @@
             },
             "sigma_min": 1e-5,
             "image_cond_model": "dinov2_vitl14_reg",
-            "finetune": {
+            "finetune_ckpt": {
                 "denoiser": "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/ss_flow_img_dit_L_16l8_fp16.pt"
             }
         }

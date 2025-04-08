@@ -146,13 +146,17 @@ class Trainer:
         # Initialize models, optimizers, etc.
         self.init_models_and_more(**kwargs)
         self.prepare_dataloader(**kwargs)
-        
+
         # Load checkpoint or initialize from scratch
         self.step = 0
         if load_dir is not None and step is not None:
+            # print("load from ...x")
             self.load(load_dir, step)
         elif finetune_ckpt is not None:
+            # print("finetune from ...x")
             self.finetune_from(finetune_ckpt)
+        # print(finetune_ckpt)
+        # print("loading finished......")
         
         # Set up output directories and tensorboard writer on master process
         if self.is_master:
