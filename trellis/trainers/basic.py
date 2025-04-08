@@ -342,10 +342,11 @@ class BasicTrainer(Trainer):
         # Load models
         model_ckpts = {}
         for name, model in self.models.items():
+            # print(f'Loading {name}...,') # denoiser
             model_state_dict = model.state_dict()
             if name in finetune_ckpt:
-                # Load checkpoint if available for this model
-                model_ckpt = torch.load(read_file_dist(finetune_ckpt[name]), map_location=self.device, weights_only=True)
+                # Load checkpoint if available for this model (have set to false)
+                model_ckpt = torch.load(read_file_dist(finetune_ckpt[name]), map_location=self.device, weights_only=False)
                 # Handle shape mismatches by keeping the original parameters
                 for k, v in model_ckpt.items():
                     if model_ckpt[k].shape != model_state_dict[k].shape:
@@ -460,7 +461,9 @@ class BasicTrainer(Trainer):
             with nested_contexts(*sync_contexts), elastic_controller_context():
                 with amp_context():
                     # Forward pass - compute loss
+                    # print("start training loss")
                     loss, status = self.training_losses(**mb_data)
+                    # print("end training loss")
                     l = loss['loss'] / len(data_list)
                 ## backward
                 if self.fp16_mode == 'amp':

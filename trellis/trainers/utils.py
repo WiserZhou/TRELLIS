@@ -1,5 +1,7 @@
 import torch.nn as nn
 
+import open3d as o3d
+import numpy as np
 
 # FP16 utils
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
@@ -74,4 +76,23 @@ class LinearWarmupLRScheduler(LambdaLR):
         if current_step < self.warmup_steps:
             return float(current_step + 1) / self.warmup_steps
         return 1.0
-        
+
+def save_ply(point_cloud, filename):
+    """
+    Save a point cloud to a PLY file.
+    
+    Args:
+        point_cloud (o3d.geometry.PointCloud): The point cloud to save.
+        filename (str): The name of the output PLY file.
+    """
+    o3d.io.write_point_cloud(filename, point_cloud)
+
+    # 创建一个示例点云数据
+    points = np.random.rand(100, 3)  # 100个随机点，三维空间
+    colors = np.random.rand(100, 3)  # 100个随机颜色
+    point_cloud = o3d.geometry.PointCloud()
+    point_cloud.points = o3d.utility.Vector3dVector(points)
+    point_cloud.colors = o3d.utility.Vector3dVector(colors)
+
+    # 保存为 ply 文件
+    o3d.io.write_point_cloud("output.ply", point_cloud)

@@ -169,6 +169,10 @@ class FlowMatchingTrainer(BasicTrainer):
         Returns:
             Dictionary with conditioning data and additional arguments.
         """
+        # print("debugging get_inference_cond")
+        # print(cond)
+        # print(kwargs)
+        
         return {'cond': cond, **kwargs}
 
     def get_sampler(self, **kwargs) -> samplers.FlowEulerSampler:
@@ -242,6 +246,7 @@ class FlowMatchingTrainer(BasicTrainer):
         t = self.sample_t(x_0.shape[0]).to(x_0.device).float()
         # Diffuse the clean data to timestep t
         x_t = self.diffuse(x_0, t, noise=noise)
+        # print("cond shape ", cond.shape)
         # Process conditioning information
         cond = self.get_cond(cond, **kwargs)
         
@@ -308,18 +313,41 @@ class FlowMatchingTrainer(BasicTrainer):
         for i in range(0, num_samples, batch_size):
             batch = min(batch_size, num_samples - i)
             data = next(iter(dataloader))
-            # Move data to GPU and slice to current batch size
+            # print("data is instance")
+
+            #   Move data to GPU and slice to current batch size
             data = {k: v[:batch].cuda() if isinstance(v, torch.Tensor) else v[:batch] for k, v in data.items()}
+
+            # print("data is instance2")
             # Generate random noise for sampling start point
             noise = torch.randn_like(data['x_0'])
             # Store ground truth data
             sample_gt.append(data['x_0'])
             # Prepare conditioning visualization
             cond_vis.append(self.vis_cond(**data))
+
+            # print("data is instance3")
+
             # Remove ground truth from conditioning data
             del data['x_0']
+
+            # print("data['cond'] shape ", data['cond'].shape) # torch.Size([4, 3, 3, 518, 518])
+            # print("data is instance4.5")
+            # for k, v in data.items():
+            #     print(f"data {k} value shape {len(v)}")
+            #     for i in v:
+            #         print(f"{i.shape}")
+            # data cond value shape 4
+            # torch.Size([3, 3, 518, 518])
+            # torch.Size([3, 3, 518, 518])
+            # torch.Size([3, 3, 518, 518])
+            # torch.Size([3, 3, 518, 518])
+            # print(**data)
             # Get conditioning for inference
             args = self.get_inference_cond(**data)
+            # args['cond']
+            # print("args['cond'] shape ", args['cond'].shape) # torch.Size([4, 4122, 1024])
+            # print("data is instance4")
             # Run the sampler to generate samples
             res = sampler.sample(
                 self.models['denoiser'],
@@ -329,24 +357,64 @@ class FlowMatchingTrainer(BasicTrainer):
                 cfg_strength=3.0,   # Classifier-free guidance strength
                 verbose=verbose,    # Whether to display progress
             )
+            # print("data is instance5")
             # Store generated samples
             sample.append(res.samples)
 
         # Concatenate batches of samples
         sample_gt = torch.cat(sample_gt, dim=0)
         sample = torch.cat(sample, dim=0)
+
+        # print("sample shape ", sample.shape)
         
         # Prepare results dictionary
         sample_dict = {
             'sample_gt': {'value': sample_gt, 'type': 'sample'},
             'sample': {'value': sample, 'type': 'sample'},
         }
+        # print("cond vis ", cond_vis)
+        # raise NotImplementedError("Debugging sample_dict")
         # Add conditioning visualizations
         sample_dict.update(dict_reduce(cond_vis, None, {
             'value': lambda x: torch.cat(x, dim=0),
             'type': lambda x: x[0],
         }))
-        
+
+        # print("run snapshot done")
+        # Debug function to print shapes of all values in nested dictionaries
+
+        # Print all shapes in the sample_dict
+        # print("Sample dictionary structure and shapes:")
+        # sample_gt: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # sample: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # image: 
+        # tensor with shape torch.Size([64, 3, 3, 518, 518])
+        # image
+
+        # Sample dictionary structure and shapes:
+        # sample_gt: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # sample: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # image: 
+        # image
+        # tensor with shape torch.Size([64, 3, 518, 518])
+        # print("Sample dictionary structure and shapes:")
+        # for key, value in sample_dict.items():
+        #     print(f"{key}: ")
+        #     for k, v in value.items():
+        #         # print(f"  {k.shape}: {v}")
+        #         if k == 'type':
+        #             print(v)
+        #         elif k == 'value':
+        #             print(f"tensor with shape {v.shape}")
+
         return sample_dict
 
     

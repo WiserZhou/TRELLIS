@@ -78,7 +78,7 @@ class ImageConditionedMixin:
         }
     
     @torch.no_grad()
-    def encode_image(self, image: Union[torch.Tensor, List[Image.Image]]) -> torch.Tensor:
+    def encode_image(self, image: Union[torch.Tensor, List[Image.Image], List[torch.Tensor]]) -> torch.Tensor:
         """
         Encode the image into feature representations using the DINOv2 model.
         
@@ -91,43 +91,62 @@ class ImageConditionedMixin:
         Raises:
             ValueError: If the image input is not a supported type.
         """
-        # Handle different image input formats
-        if isinstance(image, torch.Tensor):
-            assert image.ndim == 4, "Image tensor should be batched (B, C, H, W)"
-        elif isinstance(image, list):
-            if all(isinstance(i, Image.Image) for i in image): 
-                # assert all(isinstance(i, Image.Image) for i in image), "Image list should be list of PIL images"
-                # Resize all images to 518x518 pixels using high-quality LANCZOS resampling
-                image = [i.resize((518, 518), Image.LANCZOS) for i in image]
-
-                # Convert images to RGB, transform to numpy arrays, convert to float32, and normalize pixel values to range [0,1]
-                image = [np.array(i.convert('RGB')).astype(np.float32) / 255 for i in image]
-
-                # Convert numpy arrays to PyTorch tensors and rearrange dimensions from (H,W,C) to (C,H,W) format required by PyTorch
-                image = [torch.from_numpy(i).permute(2, 0, 1).float() for i in image]
-
-                # Stack individual tensors into a batch and move to GPU for faster processing
-                image = torch.stack(image).cuda()
-            elif all(isinstance(i, torch.Tensor) for i in image):
-                # Stack individual tensors into a batch and move to GPU for faster processing
-                image = torch.stack(image).cuda()
-            else:
-                raise ValueError("Image list should be either list of PIL images or list of tensors")
-        else:
-            raise ValueError(f"Unsupported type of image: {type(image)}")
-        
         # Initialize model if not already initialized
         if self.image_cond_model is None:
             self._init_image_cond_model()
+
+        # Handle different image input formats
+        if isinstance(image, torch.Tensor) and image.ndim == 4:
+            # Process 4D tensor (batch) at once without for loop
+            image = image.cuda()
+            image = self.image_cond_model['transform'](image)
+            features = self.image_cond_model['model'](image, is_training=True)['x_prenorm']
+            patchtokens = F.layer_norm(features, features.shape[-1:])
+            return patchtokens
             
-        # Apply normalization and extract features
-        image = self.image_cond_model['transform'](image).cuda()
-        features = self.image_cond_model['model'](image, is_training=True)['x_prenorm']
-        
-        # Apply layer normalization to the patch tokens
-        patchtokens = F.layer_norm(features, features.shape[-1:])
+        elif isinstance(image, torch.Tensor) and image.ndim == 5:
+            if all(isinstance(i, torch.Tensor) for i in image):
+                # print("image is list of tensors")
+                image = image.cuda()
+            else:
+                raise ValueError("Image list should be either list of PIL images or list of tensors")
+            
+        elif isinstance(image, list) and all(isinstance(i, Image.Image) for i in image):
+            # print("image is list of PIL images")
+            # Resize all images to 518x518 pixels using high-quality LANCZOS resampling
+            image = [i.resize((518, 518), Image.LANCZOS) for i in image]
+            # Convert images to RGB, transform to numpy arrays, convert to float32, and normalize pixel values to range [0,1]
+            image = [np.array(i.convert('RGB')).astype(np.float32) / 255 for i in image]
+            # Convert numpy arrays to PyTorch tensors and rearrange dimensions from (H,W,C) to (C,H,W) format required by PyTorch
+            image = [torch.from_numpy(i).permute(2, 0, 1).float() for i in image]
+            # Stack individual tensors into a batch and move to GPU for faster processing
+            image = torch.stack(image).cuda()
+        else:
+            raise ValueError(f"Unsupported type of image: {type(image)}")
+
+        # For non-4D tensor cases, process images one by one
+        patchtoken_list = []
+        # print(f"shape of image: {image.shape}") # shape of image: torch.Size([4, 3, 3, 518, 518])
+        for img in image:
+            # print(img.shape)
+            img = self.image_cond_model['transform'](img).cuda()
+            # print(f"shape of img: {img.shape}") # shape of img: torch.Size([4, 3, 518, 518])
+            features = self.image_cond_model['model'](img, is_training=True)['x_prenorm']
+            patchtokens = F.layer_norm(features, features.shape[-1:])
+            # print(f"shape of patchtokens: {patchtokens.shape}")
+            patchtoken_list.append(patchtokens)
+        # Concatenate the patch tokens along the batch dimension
+        # print(f"shape of patchtoken_list: {len(patchtoken_list)}")
+        patchtokens = torch.concat(patchtoken_list, dim=-2)
+        # print(f"shape of patchtokens: {patchtokens.shape}") # shape of patchtokens: torch.Size([4, 4122, 1024])
+        # raise ValueError(f"Unsupported type of image: {type(image)}")
         return patchtokens
-        
+# shape of patchtokens: torch.Size([3, 1374, 1024])
+# shape of patchtokens: torch.Size([3, 1374, 1024])
+# shape of patchtokens: torch.Size([3, 1374, 1024])
+# shape of patchtokens: torch.Size([3, 1374, 1024])
+# shape of patchtoken_list: 4
+# shape of patchtokens: torch.Size([3, 5496, 1024])
     def get_cond(self, cond, **kwargs):
         """
         Get the conditioning data for training.
@@ -142,6 +161,8 @@ class ImageConditionedMixin:
         Returns:
             Conditioning data processed by the parent class's get_cond method.
         """
+        if cond.ndim == 5:
+            cond = cond.permute(1, 0, 2, 3, 4)
         cond = self.encode_image(cond)
         # Create negative conditioning as zeros (used for classifier-free guidance)
         kwargs['neg_cond'] = torch.zeros_like(cond)
@@ -161,10 +182,22 @@ class ImageConditionedMixin:
         Returns:
             Conditioning data processed by the parent class's get_inference_cond method.
         """
+        # print(f"get inference cond: {cond}")
+        # print(kwargs)
+        # cond.shape torch.Size([4, 3, 3, 518, 518])
+        if cond.ndim == 5:
+            cond = cond.permute(1, 0, 2, 3, 4)
+        # cond.shape torch.Size([3, 4, 3, 518, 518])
         cond = self.encode_image(cond)
+        #  torch.Size([4, 4122, 1024])
+        # print(f"get inference cond2222")
         # Create negative conditioning as zeros (used for classifier-free guidance)
         kwargs['neg_cond'] = torch.zeros_like(cond)
+        # print("get inference cond done2")
+        # print(f"{kwargs}")
         cond = super().get_inference_cond(cond, **kwargs)
+        # print("get_inference_cond done")
+        # print("shape of cond: ", cond.shape)
         return cond
 
     def vis_cond(self, cond, **kwargs):
@@ -181,4 +214,7 @@ class ImageConditionedMixin:
         Returns:
             dict: Dictionary containing the image data and its type for visualization.
         """
-        return {'image': {'value': cond, 'type': 'image'}}
+        if isinstance(cond, torch.Tensor):
+            return {'image': {'value': cond, 'type': 'image'}}
+        else:
+            raise ValueError(f"Unsupported type of cond: {type(cond)}")

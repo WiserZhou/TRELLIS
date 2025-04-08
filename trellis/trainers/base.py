@@ -198,6 +198,7 @@ class Trainer:
         Sets up the data sampler and dataloader with appropriate batch size,
         workers, and other configurations for efficient data loading.
         """
+        # print("original dataset size:", len(self.dataset))
         num_dataset = 128
         # Wrap your dataset in the DuplicatedDataset if it's too small
         if len(self.dataset) < num_dataset:  # Adjust this threshold as needed
@@ -371,8 +372,29 @@ class Trainer:
         # Calculate how many samples each process should generate in distributed setting
         num_samples_per_process = int(np.ceil(num_samples / self.world_size))
         # Generate samples using the model's snapshot implementation
-        samples = self.run_snapshot(num_samples_per_process, batch_size=batch_size, verbose=verbose)
 
+        samples = self.run_snapshot(num_samples_per_process, batch_size=batch_size, verbose=verbose)
+        
+        # sample_gt: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # sample: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # image: 
+        # tensor with shape torch.Size([64, 3, 3, 518, 518])
+        # image
+
+        # Sample dictionary structure and shapes:
+        # sample_gt: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # sample: 
+        # tensor with shape torch.Size([64, 8, 16, 16, 16])
+        # sample
+        # image: 
+        # image
+        # tensor with shape torch.Size([64, 3, 518, 518])
         # Process the generated samples for visualization
         for key in list(samples.keys()):
             if samples[key]['type'] == 'sample':
@@ -388,37 +410,54 @@ class Trainer:
                     # Otherwise, update the existing entry by replacing with visualization
                     samples[key] = {'value': vis, 'type': 'image'}
 
-        # Gather samples from all processes in distributed training setup
-        if self.world_size > 1:
-            for key in samples.keys():
-                # Ensure tensor is contiguous in memory for efficient gathering operation
-                samples[key]['value'] = samples[key]['value'].contiguous()
-                if self.is_master:
-                    # Create buffers on master process to receive data from all processes
-                    all_images = [torch.empty_like(samples[key]['value']) for _ in range(self.world_size)]
-                else:
-                    # Non-master processes don't need to allocate receive buffers
-                    all_images = []
-                # Gather data from all processes to the master (rank 0)
-                dist.gather(samples[key]['value'], all_images, dst=0)
-                if self.is_master:
-                    # Concatenate all gathered samples and limit to requested number
-                    samples[key]['value'] = torch.cat(all_images, dim=0)[:num_samples]
+        # # Gather samples from all processes in distributed training setup
+        # if self.world_size > 1:
+        #     for key in samples.keys():
+        #         # Ensure tensor is contiguous in memory for efficient gathering operation
+        #         samples[key]['value'] = samples[key]['value'].contiguous()
+        #         if self.is_master:
+        #             # Create buffers on master process to receive data from all processes
+        #             all_images = [torch.empty_like(samples[key]['value']) for _ in range(self.world_size)]
+        #         else:
+        #             # Non-master processes don't need to allocate receive buffers
+        #             all_images = []
+        #         # Gather data from all processes to the master (rank 0)
+        #         dist.gather(samples[key]['value'], all_images, dst=0)
+        #         if self.is_master:
+        #             # Concatenate all gathered samples and limit to requested number
+        #             samples[key]['value'] = torch.cat(all_images, dim=0)[:num_samples]
 
         # Save images to disk (only on master process)
         if self.is_master:
             # Create output directory for current snapshot
             os.makedirs(os.path.join(self.output_dir, 'samples', suffix), exist_ok=True)
-            for key in samples.keys():
+            for key in samples.keys(): # Error: The size of tensor a (3) must match the size of tensor b (518) at non-singleton dimension 2
                 if samples[key]['type'] == 'image':
-                    # Save image samples using torchvision utilities
-                    utils.save_image(
-                        samples[key]['value'],
-                        os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}_{index}.jpg'),
-                        nrow=int(np.sqrt(num_samples)),  # Arrange images in a square grid
-                        normalize=True,
-                        value_range=self.dataset.value_range,  # Use dataset's specified value range for normalization
-                    )
+                    # print(f"Saving {key} images...")
+                    # print(f"shape is {samples[key]['value'].shape}") # shape is torch.Size([64, 3, 3, 518, 518])
+                    # Reshape [64, 3, 3, 518, 518] -> [64, 9, 518, 518]
+                    if samples[key]['value'].ndim == 5:
+                        value = samples[key]['value']
+                        value = value.permute(1, 0, 2, 3, 4)
+                        # print(f"Reshaped tensor from {value.shape} to {samples[key]['value'].shape}")
+                        for indexx in range(value.shape[0]):
+                            # Save image samples using torchvision utilities
+                            utils.save_image(
+                                value[indexx],
+                                os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}_{index}_{indexx}.jpg'),
+                                nrow=int(np.sqrt(num_samples)),  # Arrange images in a square grid
+                                normalize=True,
+                                value_range=self.dataset.value_range,  # Use dataset's specified value range for normalization
+                            )
+                    else:
+                        utils.save_image(
+                            samples[key]['value'],
+                            os.path.join(self.output_dir, 'samples', suffix, f'{key}_{suffix}_{index}.jpg'),
+                            nrow=int(np.sqrt(num_samples)),  # Arrange images in a square grid
+                            normalize=True,
+                            value_range=self.dataset.value_range,  # Use dataset's specified value range for normalization
+                        )
+                    # print(f"key is ****{key}")
                 elif samples[key]['type'] == 'number':
                     # Process and save numerical samples as images with annotations
                     min = samples[key]['value'].min()
@@ -574,6 +613,9 @@ class Trainer:
 
             data_list = self.load_data()
             step_log = self.run_step(data_list)
+
+            # # test
+            # self.snapshot(index=self.step)
 
             time_end = time.time()
             time_elapsed += time_end - time_start

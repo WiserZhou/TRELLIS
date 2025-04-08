@@ -2,6 +2,7 @@ import os
 import imageio
 from trellis.utils import render_utils, postprocessing_utils
 import json
+from PIL import Image
 
 def save_outputs(outputs, output_dir="./z_output", filename_prefix="sample_image", save_video=True, save_glb=True):
     """
@@ -61,7 +62,7 @@ def save_outputs(outputs, output_dir="./z_output", filename_prefix="sample_image
             os.remove(ply_path)
         outputs['gaussian'][0].save_ply(ply_path)
 
-def load_render_info(json_path):
+def load_render_cond_info(sh256, json_dir="/mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts/renders_cond"):
     """
     Load render information from JSON file and extract part names and image paths
     
@@ -73,17 +74,20 @@ def load_render_info(json_path):
         - Dictionary mapping each part name to its corresponding image paths
         - List of whole_{num_parts}_2 model image paths
     """
+    data_dir = os.path.join(json_dir, sh256)
+
+    json_path = os.path.join(data_dir, "transforms.json")
+
     with open(json_path, 'r') as f:
         render_info = json.load(f)
     
-    # Extract whole_{num_parts}_2 model information
-    whole_model_paths = render_info["whole_model"]["image_paths"]
+    cond_list = []
+    for i in range(0, len(render_info["frames"]), 4):
+        view_list = []
+        for j in range(4):
+            image_path = os.path.join(data_dir, render_info["frames"][i+j]["file_path"])
+            image = Image.open(image_path)
+            view_list.append(image)
+        cond_list.append(view_list)
     
-    # Extract part information
-    parts_info = {}
-    for part in render_info["parts"]:
-        name = part["name"]
-        image_paths = part["image_paths"]
-        parts_info[name] = image_paths
-    
-    return parts_info, whole_model_paths
+    return cond_list

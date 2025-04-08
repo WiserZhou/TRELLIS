@@ -276,10 +276,14 @@ class SparseStructureFlowModel(nn.Module):
         t_emb = t_emb.type(self.dtype)
         h = h.type(self.dtype)
         cond = cond.type(self.dtype)
-        
+        # print("transfer cond")
+        # print("*" * 20)
+        # print(cond.shape) # torch.Size([4, 4122, 1024])
         # Process through transformer blocks
         for block in self.blocks:
             h = block(h, t_emb, cond)
+        
+        # print("transferred ")
             
         # Convert back to original dtype
         h = h.type(x.dtype)

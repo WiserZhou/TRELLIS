@@ -90,16 +90,17 @@ def main(local_rank, cfg):
     }
 
     # Generate and save model parameter summaries (only on main process)
-    if rank == 0:
-        for name, backbone in model_dict.items():
-            model_summary = get_model_summary(backbone)
-            print(f'\n\nBackbone: {name}\n' + model_summary)
-            with open(os.path.join(cfg.output_dir, f'{name}_model_summary.txt'), 'w') as fp:
-                print(model_summary, file=fp)
+    # if rank == 0:
+    #     for name, backbone in model_dict.items():
+    #         model_summary = get_model_summary(backbone)
+    #         print(f'\n\nBackbone: {name}\n' + model_summary)
+    #         with open(os.path.join(cfg.output_dir, f'{name}_model_summary.txt'), 'w') as fp:
+    #             print(model_summary, file=fp)
 
     print("Load trainer ...")
     # Initialize trainer with models, dataset and configuration
-    trainer = getattr(trainers, cfg.trainer.name)(model_dict, dataset, **cfg.trainer.args, output_dir=cfg.output_dir, load_dir=cfg.load_dir, step=cfg.load_ckpt)
+    trainer = getattr(trainers, cfg.trainer.name)(model_dict, dataset, **cfg.trainer.args, 
+        output_dir=cfg.output_dir, load_dir=cfg.load_dir, step=cfg.load_ckpt)
 
     # Start training or profiling based on configuration
     if not cfg.tryrun:
@@ -128,7 +129,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_gpus', type=int, default=-1, help='Number of GPUs per node, default to all')
     parser.add_argument('--master_addr', type=str, default='localhost', help='Master address for distributed training')
     parser.add_argument('--master_port', type=str, default='12345', help='Port for distributed training')
-    
+
     # Process arguments
     opt = parser.parse_args()
     opt.load_dir = opt.load_dir if opt.load_dir != '' else opt.output_dir

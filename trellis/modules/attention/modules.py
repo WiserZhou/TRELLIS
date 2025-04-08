@@ -224,21 +224,32 @@ class MultiHeadAttention(nn.Module):
             elif self.attn_mode == "windowed":
                 raise NotImplementedError("Windowed attention is not yet implemented")
         else:
+
             # Cross-attention path
             Lkv = context.shape[1]
             q = self.to_q(x)
+            # print(f"context shape: {context.shape}")
             kv = self.to_kv(context)
+            # print("reshape kv")
             q = q.reshape(B, L, self.num_heads, -1)
             kv = kv.reshape(B, Lkv, 2, self.num_heads, -1)
+            # print("unbind kv")
             if self.qk_rms_norm:
+                # print("qk_rms_norm")
                 # Apply RMS normalization to queries and keys if enabled
                 q = self.q_rms_norm(q)
                 k, v = kv.unbind(dim=2)
+                # print("unbind kv2")
                 k = self.k_rms_norm(k)
+                # print("unbind kv3")
                 h = scaled_dot_product_attention(q, k, v)
+                # print("unbind kv4")
             else:
                 # Standard cross-attention
+                # print("unbind kv2")
+                # print(kv.shape)
                 h = scaled_dot_product_attention(q, kv)
+                # print("unbind kv3")
         # Reshape and project back to the original dimension
         h = h.reshape(B, L, -1)
         h = self.to_out(h)

@@ -95,6 +95,8 @@ class StandardDatasetBase(Dataset):
             return self.get_instance(root, instance)
         except Exception as e:
             print(e)
+            raise RuntimeError(
+                f"Failed to get instance {index} from dataset. And the length of dataset is {len(self)}")
             # On error, return a random instance instead
             return self.__getitem__(np.random.randint(0, len(self)))
         
@@ -241,7 +243,7 @@ class ImageConditionedMixin:
         
         # Apply alpha compositing - multiply RGB channels by alpha to make transparent areas black
         image = image * alpha.unsqueeze(0)  # Broadcasting alpha across all channels
-
+        # print("processed image2", image.shape)
         return image
     
     def get_instance(self, root, instance, select_method='part'):
@@ -284,21 +286,30 @@ class ImageConditionedMixin:
 
         elif select_method == 'part':
             
+            # print("call the part method")
             image_list = []
             split_index = [i for i in range(0, len(metadata['frames']), 4)]
+            # print("split_index", split_index)
 
             # Randomly select 3 indices from split_index
             selected_indices = np.random.choice(split_index, 3, replace=False)
+            # print("selected_indices", selected_indices)
 
             for i, index in enumerate(selected_indices):
                 index = index + np.random.randint(4)
             
-                metadata = metadata['frames'][index]
-                image_path = os.path.join(image_root, metadata['file_path'])
+                metadata2 = metadata['frames'][index]
+                image_path = os.path.join(image_root, metadata2['file_path'])
+                # print("image_path", image_path)
                 image = self.process_image(image_path)  # Process the image
+                # print("processed image", image.shape)
+                # print("processed image", image.shape)
                 image_list.append(image)
             
-            pack['cond'] = image_list
+            # print("image_list", len(image_list))
+            
+            pack['cond'] = torch.stack(image_list)
+            # print("pack['cond']", pack['cond'].shape)
         
         else:
             raise ValueError("Invalid select_method. Use 'random' or 'part'.")

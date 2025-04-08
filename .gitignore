@@ -403,3 +403,6 @@ __pycache__
 *.zip
 *.log
 outputs/
+pretrained/
+outputs2/
+*.pt
