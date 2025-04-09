@@ -1,3 +1,9 @@
+"""
+This file defines dataset classes for handling structured latent representations (SLat) in the TRELLIS framework.
+It provides functionality for loading, processing, and visualizing 3D structures represented as sparse tensors.
+The file includes classes for standard datasets as well as text-conditioned and image-conditioned variants.
+"""
+
 import json
 import os
 from typing import *
@@ -13,6 +19,10 @@ from ..utils.data_utils import load_balanced_group_indices
 
 
 class SLatVisMixin:
+    """
+    Mixin class that adds visualization capabilities for structured latent representations.
+    Handles loading of latent decoders and rendering 3D structures from latent codes.
+    """
     def __init__(
         self,
         *args,
@@ -21,33 +31,61 @@ class SLatVisMixin:
         slat_dec_ckpt: Optional[str] = None,
         **kwargs
     ):
+        """
+        Initialize the visualization mixin.
+        
+        Args:
+            pretrained_slat_dec: Identifier for pretrained decoder model
+            slat_dec_path: Optional path to custom decoder model
+            slat_dec_ckpt: Optional checkpoint name for custom decoder
+        """
         super().__init__(*args, **kwargs)
-        self.slat_dec = None
+        self.slat_dec = None  # Decoder model (loaded on demand)
         self.pretrained_slat_dec = pretrained_slat_dec
         self.slat_dec_path = slat_dec_path
         self.slat_dec_ckpt = slat_dec_ckpt
         
     def _loading_slat_dec(self):
+        """
+        Load the structured latent decoder model if not already loaded.
+        Uses either a custom path or pretrained model based on initialization parameters.
+        """
         if self.slat_dec is not None:
             return
         if self.slat_dec_path is not None:
+            # Load from custom path
             cfg = json.load(open(os.path.join(self.slat_dec_path, 'config.json'), 'r'))
             decoder = getattr(models, cfg['models']['decoder']['name'])(**cfg['models']['decoder']['args'])
             ckpt_path = os.path.join(self.slat_dec_path, 'ckpts', f'decoder_{self.slat_dec_ckpt}.pt')
             decoder.load_state_dict(torch.load(read_file_dist(ckpt_path), map_location='cpu', weights_only=True))
         else:
+            # Load pretrained model
             decoder = models.from_pretrained(self.pretrained_slat_dec)
         self.slat_dec = decoder.cuda().eval()
 
     def _delete_slat_dec(self):
+        """
+        Delete the decoder model to free up memory.
+        """
         del self.slat_dec
         self.slat_dec = None
 
     @torch.no_grad()
     def decode_latent(self, z, batch_size=4):
+        """
+        Decode latent vectors into 3D representations.
+        
+        Args:
+            z: Latent vectors to decode
+            batch_size: Batch size for processing
+            
+        Returns:
+            List of 3D representations
+        """
         self._loading_slat_dec()
         reps = []
         if self.normalization is not None:
+            # Apply normalization if needed
             z = z * self.std.to(z.device) + self.mean.to(z.device)
         for i in range(0, z.shape[0], batch_size):
             reps.append(self.slat_dec(z[i:i+batch_size]))
@@ -57,10 +95,19 @@ class SLatVisMixin:
 
     @torch.no_grad()
     def visualize_sample(self, x_0: Union[SparseTensor, dict]):
+        """
+        Generate multi-view renderings of a 3D representation.
+        
+        Args:
+            x_0: Input sparse tensor or dictionary containing sparse tensor
+            
+        Returns:
+            Tensor of rendered images from multiple viewpoints
+        """
         x_0 = x_0 if isinstance(x_0, SparseTensor) else x_0['x_0']
         reps = self.decode_latent(x_0.cuda())
         
-        # Build camera
+        # Build camera parameters for multiple viewpoints
         yaws = [0, np.pi / 2, np.pi, 3 * np.pi / 2]
         yaws_offset = np.random.uniform(-np.pi / 4, np.pi / 4)
         yaws = [y + yaws_offset for y in yaws]
@@ -69,6 +116,7 @@ class SLatVisMixin:
         exts = []
         ints = []
         for yaw, pitch in zip(yaws, pitch):
+            # Calculate camera position based on spherical coordinates
             orig = torch.tensor([
                 np.sin(yaw) * np.cos(pitch),
                 np.cos(yaw) * np.cos(pitch),
@@ -80,6 +128,7 @@ class SLatVisMixin:
             exts.append(extrinsics)
             ints.append(intrinsics)
 
+        # Render images for each representation
         renderer = get_renderer(reps[0])
         images = []
         for representation in reps:
@@ -87,6 +136,7 @@ class SLatVisMixin:
             tile = [2, 2]
             for j, (ext, intr) in enumerate(zip(exts, ints)):
                 res = renderer.render(representation, ext, intr)
+                # Place each view in a grid position
                 image[:, 512 * (j // tile[1]):512 * (j // tile[1] + 1), 512 * (j % tile[1]):512 * (j % tile[1] + 1)] = res['color']
             images.append(image)
         images = torch.stack(images)
@@ -96,7 +146,8 @@ class SLatVisMixin:
     
 class SLat(SLatVisMixin, StandardDatasetBase):
     """
-    structured latent dataset
+    Structured latent dataset class.
+    Handles loading and processing of structured latent representations.
     
     Args:
         roots (str): path to the dataset
@@ -119,6 +170,9 @@ class SLat(SLatVisMixin, StandardDatasetBase):
         slat_dec_path: Optional[str] = None,
         slat_dec_ckpt: Optional[str] = None,
     ):
+        """
+        Initialize the structured latent dataset.
+        """
         self.normalization = normalization
         self.latent_model = latent_model
         self.min_aesthetic_score = min_aesthetic_score
@@ -132,27 +186,52 @@ class SLat(SLatVisMixin, StandardDatasetBase):
             slat_dec_ckpt=slat_dec_ckpt,
         )
 
+        # Store voxel counts for each instance
         self.loads = [self.metadata.loc[sha256, 'num_voxels'] for _, sha256 in self.instances]
         
+        # Set up normalization parameters if provided
         if self.normalization is not None:
             self.mean = torch.tensor(self.normalization['mean']).reshape(1, -1)
             self.std = torch.tensor(self.normalization['std']).reshape(1, -1)
       
     def filter_metadata(self, metadata):
+        """
+        Filter dataset metadata based on criteria.
+        
+        Args:
+            metadata: DataFrame containing dataset metadata
+            
+        Returns:
+            Tuple of (filtered metadata, statistics)
+        """
         stats = {}
+        # Filter instances with available latent representation
         metadata = metadata[metadata[f'latent_{self.latent_model}']]
         stats['With latent'] = len(metadata)
+        # Filter based on aesthetic score
         metadata = metadata[metadata['aesthetic_score'] >= self.min_aesthetic_score]
         stats[f'Aesthetic score >= {self.min_aesthetic_score}'] = len(metadata)
+        # Filter based on voxel count
         metadata = metadata[metadata['num_voxels'] <= self.max_num_voxels]
         stats[f'Num voxels <= {self.max_num_voxels}'] = len(metadata)
         return metadata, stats
 
     def get_instance(self, root, instance):
+        """
+        Load a specific instance from the dataset.
+        
+        Args:
+            root: Dataset root path
+            instance: Instance identifier
+            
+        Returns:
+            Dictionary containing coordinates and features
+        """
         data = np.load(os.path.join(root, 'latents', self.latent_model, f'{instance}.npz'))
         coords = torch.tensor(data['coords']).int()
         feats = torch.tensor(data['feats']).float()
         if self.normalization is not None:
+            # Apply normalization if needed
             feats = (feats - self.mean) / self.std
         return {
             'coords': coords,
@@ -161,9 +240,21 @@ class SLat(SLatVisMixin, StandardDatasetBase):
         
     @staticmethod
     def collate_fn(batch, split_size=None):
+        """
+        Collate function for creating batches from individual samples.
+        Handles sparse tensor construction and layout information.
+        
+        Args:
+            batch: List of data samples
+            split_size: Optional size for splitting large batches
+            
+        Returns:
+            Collated batch or list of batches if split_size is provided
+        """
         if split_size is None:
             group_idx = [list(range(len(batch)))]
         else:
+            # Create balanced groups based on voxel counts
             group_idx = load_balanced_group_indices([b['coords'].shape[0] for b in batch], split_size)
         packs = []
         for group in group_idx:
@@ -173,6 +264,7 @@ class SLat(SLatVisMixin, StandardDatasetBase):
             feats = []
             layout = []
             start = 0
+            # Combine coordinates and features from all samples
             for i, b in enumerate(sub_batch):
                 coords.append(torch.cat([torch.full((b['coords'].shape[0], 1), i, dtype=torch.int32), b['coords']], dim=-1))
                 feats.append(b['feats'])
@@ -180,6 +272,7 @@ class SLat(SLatVisMixin, StandardDatasetBase):
                 start += b['coords'].shape[0]
             coords = torch.cat(coords)
             feats = torch.cat(feats)
+            # Create sparse tensor
             pack['x_0'] = SparseTensor(
                 coords=coords,
                 feats=feats,
@@ -187,7 +280,7 @@ class SLat(SLatVisMixin, StandardDatasetBase):
             pack['x_0']._shape = torch.Size([len(group), *sub_batch[0]['feats'].shape[1:]])
             pack['x_0'].register_spatial_cache('layout', layout)
             
-            # collate other data
+            # Collate other data fields
             keys = [k for k in sub_batch[0].keys() if k not in ['coords', 'feats']]
             for k in keys:
                 if isinstance(sub_batch[0][k], torch.Tensor):
@@ -206,13 +299,15 @@ class SLat(SLatVisMixin, StandardDatasetBase):
     
 class TextConditionedSLat(TextConditionedMixin, SLat):
     """
-    Text conditioned structured latent dataset
+    Text conditioned structured latent dataset.
+    Extends the base SLat class with text conditioning capabilities.
     """
     pass
 
 
 class ImageConditionedSLat(ImageConditionedMixin, SLat):
     """
-    Image conditioned structured latent dataset
+    Image conditioned structured latent dataset.
+    Extends the base SLat class with image conditioning capabilities.
     """
     pass
