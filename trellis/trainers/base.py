@@ -414,22 +414,22 @@ class Trainer:
                     # Otherwise, update the existing entry by replacing with visualization
                     samples[key] = {'value': vis, 'type': 'image'}
 
-        # # Gather samples from all processes in distributed training setup
-        # if self.world_size > 1:
-        #     for key in samples.keys():
-        #         # Ensure tensor is contiguous in memory for efficient gathering operation
-        #         samples[key]['value'] = samples[key]['value'].contiguous()
-        #         if self.is_master:
-        #             # Create buffers on master process to receive data from all processes
-        #             all_images = [torch.empty_like(samples[key]['value']) for _ in range(self.world_size)]
-        #         else:
-        #             # Non-master processes don't need to allocate receive buffers
-        #             all_images = []
-        #         # Gather data from all processes to the master (rank 0)
-        #         dist.gather(samples[key]['value'], all_images, dst=0)
-        #         if self.is_master:
-        #             # Concatenate all gathered samples and limit to requested number
-        #             samples[key]['value'] = torch.cat(all_images, dim=0)[:num_samples]
+        # Gather samples from all processes in distributed training setup
+        if self.world_size > 1:
+            for key in samples.keys():
+                # Ensure tensor is contiguous in memory for efficient gathering operation
+                samples[key]['value'] = samples[key]['value'].contiguous()
+                if self.is_master:
+                    # Create buffers on master process to receive data from all processes
+                    all_images = [torch.empty_like(samples[key]['value']) for _ in range(self.world_size)]
+                else:
+                    # Non-master processes don't need to allocate receive buffers
+                    all_images = []
+                # Gather data from all processes to the master (rank 0)
+                dist.gather(samples[key]['value'], all_images, dst=0)
+                if self.is_master:
+                    # Concatenate all gathered samples and limit to requested number
+                    samples[key]['value'] = torch.cat(all_images, dim=0)[:num_samples]
 
         # Save images to disk (only on master process)
         if self.is_master:

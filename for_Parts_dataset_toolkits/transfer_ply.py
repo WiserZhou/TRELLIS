@@ -15,10 +15,9 @@ import pandas as pd
 from easydict import EasyDict as edict
 from functools import partial
 import copy
-
 def _convert_to_ply(file_path, sha256, output_dir):
     """
-    Convert a GLB file to PLY format
+    Convert a GLB file to PLY format with normalization and centering
     
     Args:
         file_path: Path to the 3D model file
@@ -42,7 +41,25 @@ def _convert_to_ply(file_path, sha256, output_dir):
     
     try:
         # Load the model
-        mesh = trimesh.load(os.path.expanduser(file_path))
+        mesh_or_scene = trimesh.load(os.path.expanduser(file_path))
+        
+        # Convert scene to a single mesh if necessary
+        if isinstance(mesh_or_scene, trimesh.Scene):
+            # Extract all meshes and combine them
+            if len(mesh_or_scene.geometry) > 0:
+                meshes = list(mesh_or_scene.geometry.values())
+                mesh = trimesh.util.concatenate(meshes)
+            else:
+                raise ValueError(f"No geometries found in {file_path}")
+        else:
+            mesh = mesh_or_scene
+        
+        # Center the model - move centroid to origin
+        mesh.vertices -= mesh.centroid
+        
+        # Normalize to fit in a unit cube
+        scale = 1.0 / max(mesh.bounding_box.extents)
+        mesh.vertices *= scale
         
         # Export as PLY
         mesh.export(ply_path, file_type='ply')

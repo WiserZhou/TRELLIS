@@ -28,6 +28,13 @@ class Pipeline:
             self.models[model_name] = models.from_pretrained(f"{st_path_name}")
         except:
             raise RuntimeError(f"Model {model_name} not found in {st_path_name}")
+    
+    def finetune_from_pretrained_list(self, model_name_paths: List[Tuple[str, str]]):
+        """
+        Load a finetuned part model.
+        """
+        for model_name, path in model_name_paths:
+            self.finetune_from_pretrained(model_name, path)
 
     @staticmethod
     def from_pretrained(path: str) -> "Pipeline":

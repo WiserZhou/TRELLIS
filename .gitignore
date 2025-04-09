@@ -406,3 +406,7 @@ outputs/
 pretrained/
 outputs2/
 *.pt
+
+# Exclude specific file from ignore
+!pretrained/TRELLIS-image-large-pt/transfer.py
+
