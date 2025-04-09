@@ -2,7 +2,7 @@ from typing import *
 import torch
 import torch.nn as nn
 from .. import models
-
+from ..utils.transfer_st_pt import convert_pt_to_safetensors, save_json
 
 class Pipeline:
     """
@@ -17,6 +17,17 @@ class Pipeline:
         self.models = models
         for model in self.models.values():
             model.eval()
+    
+    def finetune_from_pretrained(self, model_name:str, path: str):
+        """
+        Load a finetuned part model.
+        """
+        st_path_name = convert_pt_to_safetensors(path)
+        save_json(model_name, st_path_name)
+        try:
+            self.models[model_name] = models.from_pretrained(f"{st_path_name}")
+        except:
+            raise RuntimeError(f"Model {model_name} not found in {st_path_name}")
 
     @staticmethod
     def from_pretrained(path: str) -> "Pipeline":
