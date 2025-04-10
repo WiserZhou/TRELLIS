@@ -205,6 +205,7 @@ class Trainer:
         # print("original dataset size:", len(self.dataset))
         num_dataset = 128
         # Wrap your dataset in the DuplicatedDataset if it's too small
+        # print(f"Dataset size: {len(self.dataset)}")
         if len(self.dataset) < num_dataset:  # Adjust this threshold as needed
             from ..utils.data_utils import DuplicatedDataset
 
@@ -225,7 +226,6 @@ class Trainer:
             collate_fn=self.dataset.collate_fn if hasattr(self.dataset, 'collate_fn') else None,
             sampler=self.data_sampler,
         )
-
 
         self.data_iterator = cycle(self.dataloader)
 
@@ -535,29 +535,51 @@ class Trainer:
         Returns:
             list: List of data dictionaries, split according to batch_split
         """
+        # print(f"[{self.step}] Beginning load_data() method")
+
         if self.prefetch_data:
             if self._data_prefetched is None:
-                self._data_prefetched = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
+                # print(f"[{self.step}] No prefetched data, fetching initial batch")
+                data_load = next(self.data_iterator)
+                
+                self._data_prefetched = recursive_to_device(data_load, self.device, non_blocking=True)
             data = self._data_prefetched
+            # print(f"[{self.step}] Using prefetched data and loading next batch in background")
             self._data_prefetched = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
         else:
+            # print(f"[{self.step}] Prefetching disabled, loading data directly")
             data = recursive_to_device(next(self.data_iterator), self.device, non_blocking=True)
+        
+        # # Print data structure type and info
+        # if isinstance(data, dict):
+        #     keys = list(data.keys())
+        #     first_key = keys[0] if keys else None
+        #     print(f"[{self.step}] Data loaded as dict with {len(keys)} keys: {keys[:3]}{'...' if len(keys) > 3 else ''}")
+        #     if first_key and hasattr(data[first_key], 'shape'):
+        #         print(f"[{self.step}] First item shape: {data[first_key].shape}")
+        # else:
+        #     print(f"[{self.step}] Data loaded as {type(data)}, length: {len(data) if hasattr(data, '__len__') else 'unknown'}")
         
         # Split data into multiple microbatches if needed
         if isinstance(data, dict):
             if self.batch_split == 1:
+                # print(f"[{self.step}] Batch split=1, using single batch")
                 data_list = [data]
             else:
                 batch_size = list(data.values())[0].shape[0]
+                # print(f"[{self.step}] Splitting batch (size {batch_size}) into {self.batch_split} microbatches")
                 data_list = [
                     {k: v[i * batch_size // self.batch_split:(i + 1) * batch_size // self.batch_split] for k, v in data.items()}
                     for i in range(self.batch_split)
                 ]
         elif isinstance(data, list):
+            # print(f"[{self.step}] Data is already a list with {len(data)} items")
             data_list = data
         else:
+            # print(f"[{self.step}] ERROR: Unexpected data type: {type(data)}")
             raise ValueError('Data must be a dict or a list of dicts.')
         
+        # print(f"[{self.step}] Returning data_list with {len(data_list)} items")
         return data_list
 
     @abstractmethod
@@ -613,11 +635,13 @@ class Trainer:
             )
 
         while self.step < self.max_steps:
+            # print("step:", self.step)
             time_start = time.time()
-
+            print("load data")
             data_list = self.load_data()
+            print("run step")
             step_log = self.run_step(data_list)
-
+            print("run done")
             # # test
             # self.snapshot(index=self.step)
 
@@ -646,6 +670,7 @@ class Trainer:
 
             # Generate and save sample images at regular intervals
             if self.step % self.i_sample == 0:
+                # print("snapshot")
                 self.snapshot(index=self.step)
 
             # Handle logging on master process

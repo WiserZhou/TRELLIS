@@ -140,8 +140,13 @@ def _render(file_path, sha256, output_dir, num_views):
             "camera_angle_x": transforms["camera_params"][i]["fov_deg"] * (math.pi / 180.0)  # Convert fov_deg to radians
         })
     
+    # Remove existing transforms.json if it exists
+    transforms_json_path = os.path.join(output_folder, 'transforms.json')
+    if os.path.exists(transforms_json_path):
+        os.remove(transforms_json_path)
+    
     # Save transforms.json
-    with open(os.path.join(output_folder, 'transforms.json'), 'w') as f:
+    with open(transforms_json_path, 'w') as f:
         json.dump(transforms, f, indent=2)
     
     # Check if rendering was successful
@@ -202,7 +207,7 @@ if __name__ == '__main__':
     end = len(metadata) * (opt.rank + 1) // opt.world_size
     metadata = metadata[start:end]
     records = []
-
+    print(f'Processing {len(metadata)} objects...')
     # Skip objects that have already been rendered
     for sha256 in copy.copy(metadata['sha256'].values):
         if os.path.exists(os.path.join(opt.output_dir, 'renders', sha256, 'transforms.json')):

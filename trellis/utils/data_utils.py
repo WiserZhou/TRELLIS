@@ -47,6 +47,7 @@ def recursive_to_device(
         print("dict detected")
         return {k: recursive_to_device(v, device, non_blocking) for k, v in data.items()}
     else:
+        print("other type detected")
         return data
 
 
@@ -259,42 +260,61 @@ class BalancedResumableSampler(ResumableSampler):
         self.loads = dataset.loads  # Load values for each sample in the dataset
         
     def __iter__(self) -> Iterator:
+        # print(f"[BalancedResumableSampler] Starting __iter__ for rank {self.rank}, epoch {self.epoch}")
+        
         if self.shuffle:
             # Deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
+            # print(f"[BalancedResumableSampler] Shuffling with seed {self.seed + self.epoch}") # 0
             indices = torch.randperm(len(self.dataset), generator=g).tolist()  
         else:
+            # print(f"[BalancedResumableSampler] No shuffle, using sequential indices")
             indices = list(range(len(self.dataset)))  
-
+        # print(indices)
+        # print(f"[BalancedResumableSampler] Initial indices length: {len(indices)}") # 128
         if not self.drop_last:
             # Add extra samples to make it evenly divisible
             padding_size = self.total_size - len(indices)
+            # print(f"[BalancedResumableSampler] Adding padding of size {padding_size}") # 0
             if padding_size <= len(indices):
                 indices += indices[:padding_size]
             else:
-                indices += (indices * math.ceil(padding_size / len(indices)))[
-                    :padding_size
-                ]
+                indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
         else:
             # Remove tail of data to make it evenly divisible
+            # print(f"[BalancedResumableSampler] Dropping last, trimming to {self.total_size}") 
             indices = indices[: self.total_size]
+        # print(indices)
         assert len(indices) == self.total_size
+        # print(f"[BalancedResumableSampler] After padding/trimming, indices length: {len(indices)}") # 128
 
         # Balance load among processes by distributing batches based on their loads
         num_batches = len(indices) // (self.batch_size * self.world_size)
+        # print(f"[BalancedResumableSampler] Number of batches: {num_batches}") # 16
         balanced_indices = []
+
+        if len(self.loads) < len(indices):
+            # repeat the loads to match the indices
+            self.loads = self.loads * (len(indices) // len(self.loads)) + self.loads[:len(indices) % len(self.loads)]
+
         for i in range(num_batches):
             start_idx = i * self.batch_size * self.world_size
             end_idx = (i + 1) * self.batch_size * self.world_size
+            # print("start idx", start_idx) # 0
+            # print("end idx", end_idx) # 8
+            # print("batch size", self.batch_size) # 8
+            # print("world size", self.world_size) # 1
             batch_indices = indices[start_idx:end_idx]
+            # print(f"[BalancedResumableSampler] Processing batch {i+1}/{num_batches}, size: {len(batch_indices)}") #1/16 8
             batch_loads = [self.loads[idx] for idx in batch_indices]
             groups = load_balanced_group_indices(batch_loads, self.world_size, equal_size=True)
             balanced_indices.extend([batch_indices[j] for j in groups[self.rank]])
         
+        # print(f"[BalancedResumableSampler] Total balanced indices for rank {self.rank}: {len(balanced_indices)}")
         # Resume from previous state
         indices = balanced_indices[self.idx:]
-
+        # print(f"[BalancedResumableSampler] After resuming from idx {self.idx}, returning {len(indices)} indices")
         return iter(indices)
 
 

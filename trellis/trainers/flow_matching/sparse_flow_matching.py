@@ -79,6 +79,17 @@ class SparseFlowMatchingTrainer(FlowMatchingTrainer):
         for efficient batch processing. It uses BalancedResumableSampler to ensure training
         can be resumed from checkpoints, and sets up an infinite iterator over the data.
         """
+        # print("original dataset size:", len(self.dataset))
+        num_dataset = 128
+        # Wrap your dataset in the DuplicatedDataset if it's too small
+        # print(f"Dataset size: {len(self.dataset)}")
+        if len(self.dataset) < num_dataset:  # Adjust this threshold as needed
+            from ...utils.data_utils import DuplicatedDataset
+
+            self.dataset = DuplicatedDataset(self.dataset, repeat=num_dataset)
+            print(f"Dataset duplicated to {len(self.dataset)} samples")
+        
+        print("data_sampler:")
         # Create a sampler that can be resumed from checkpoints
         self.data_sampler = BalancedResumableSampler(
             self.dataset,

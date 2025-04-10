@@ -461,9 +461,9 @@ class BasicTrainer(Trainer):
             with nested_contexts(*sync_contexts), elastic_controller_context():
                 with amp_context():
                     # Forward pass - compute loss
-                    # print("start training loss")
+                    print("start training loss")
                     loss, status = self.training_losses(**mb_data)
-                    # print("end training loss")
+                    print("end training loss")
                     l = loss['loss'] / len(data_list)
                 ## backward
                 if self.fp16_mode == 'amp':

@@ -5,7 +5,6 @@ import argparse
                                             # 'auto' is faster but will do benchmarking at the beginning.
                                             # Recommended to set to 'native' if run only once.
 
-from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
 from process_utils import save_outputs, load_render_cond_info
 
@@ -24,7 +23,7 @@ def parse_args():
     parser.add_argument("--finetune_component", type=str, default="sparse_structure_flow_model",
                        help="Component to finetune")
     parser.add_argument("--finetune_path", type=str, 
-                       default="/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/ss_flow_img_dit_L_16l8_fp16_1node_finetune2/ckpts/denoiser_step0020000.pt",
+                       default="/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/ss_flow_img_dit_L_16l8_fp16_1node_finetune/ckpts/denoiser_step0010000.pt",
                        help="Path to finetuned model")
     
     # Data settings
@@ -68,13 +67,15 @@ def main():
     # "slat_decoder_mesh": "ckpts/slat_dec_mesh_swin8_B_64l8m256c_fp16",
     # "slat_flow_model": "ckpts/slat_flow_img_dit_L_64l8p2_fp16"
 
-    pipeline.finetune_from_pretrained(model_name=args.finetune_component, path=args.finetune_path)
+    # pipeline.finetune_from_pretrained(model_name=args.finetune_component, path=args.finetune_path)
+    pipeline.finetune_from_pretrained_list([("sparse_structure_flow_model", "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/ss_flow_img_dit_L_16l8_fp16_1node_finetune/ckpts/denoiser_step0020000.pt"),
+        ("slat_flow_model", "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/slat_flow_img_dit_L_64l8p2_fp16_1node_finetune/ckpts/denoiser_step0020000.pt")])
 
     pipeline.cuda()
 
     parts_info_list = load_render_cond_info(sh256=args.sh256, json_dir=args.json_dir)
 
-    num_images = len(parts_info_list)
+    # num_images = len(parts_info_list)
 
     # for i in range(num_images):
         # Run the pipeline

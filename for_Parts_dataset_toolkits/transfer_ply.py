@@ -15,6 +15,20 @@ import pandas as pd
 from easydict import EasyDict as edict
 from functools import partial
 import copy
+import numpy as np
+
+def rotate_mesh(mesh):
+    # 正向旋转矩阵：绕X轴旋转90度
+    rotation_matrix = np.array([
+        [1, 0, 0],
+        [0, 0, 1],
+        [0, -1, 0]
+    ])
+    
+    # 应用旋转矩阵到顶点
+    mesh.vertices = np.dot(mesh.vertices, rotation_matrix)
+    return mesh
+
 def _convert_to_ply(file_path, sha256, output_dir):
     """
     Convert a GLB file to PLY format with normalization and centering
@@ -35,9 +49,9 @@ def _convert_to_ply(file_path, sha256, output_dir):
     
     ply_path = os.path.join(output_folder, 'mesh.ply')
     
-    # Skip if already converted
-    if os.path.exists(ply_path):
-        return {'sha256': sha256, 'converted': True}
+    # # Skip if already converted
+    # if os.path.exists(ply_path):
+    #     return {'sha256': sha256, 'converted': True}
     
     try:
         # Load the model
@@ -54,20 +68,66 @@ def _convert_to_ply(file_path, sha256, output_dir):
         else:
             mesh = mesh_or_scene
         
+        mesh = rotate_mesh(mesh)
+
         # Center the model - move centroid to origin
         mesh.vertices -= mesh.centroid
-        
+
         # Normalize to fit in a unit cube
         scale = 1.0 / max(mesh.bounding_box.extents)
         mesh.vertices *= scale
-        
-        # Export as PLY
+
+        # Calculate the current bounding box after scaling
+        scaled_bbox_min = mesh.vertices.min(axis=0)
+        scaled_bbox_max = mesh.vertices.max(axis=0)
+
+        # Calculate the margin to shrink the mesh slightly inside the unit cube
+        margin = 0.05  # You can adjust this value to control how much smaller the mesh should be
+        shift = (scaled_bbox_max - scaled_bbox_min) * margin
+
+        # Apply the shift to move the mesh inward
+        mesh.vertices -= (scaled_bbox_min + scaled_bbox_max) / 2  # Move the mesh to center
+
+        # Ensure that the shift is applied uniformly on all sides, not just on the x, y, z direction.
+        mesh.vertices += shift  # Apply the margin to shrink it slightly inside
+
+        # Recalculate bounding box after shifting
+        scaled_bbox_min = mesh.vertices.min(axis=0)
+        scaled_bbox_max = mesh.vertices.max(axis=0)
+
+        # Now ensure there's no contact with the top boundary by adjusting again
+        center_shift = (scaled_bbox_max - scaled_bbox_min) * margin
+        mesh.vertices -= center_shift  # Adjust the mesh even further to ensure it doesn't touch the top or bottom
+
+        # Export as PLY, force overwrite if file exists
         mesh.export(ply_path, file_type='ply')
         
         return {'sha256': sha256, 'converted': True}
+    
     except Exception as e:
+
         print(f"Error converting {file_path}: {e}")
         return {'sha256': sha256, 'converted': False}
+
+def _convert_to_ply_blender(file_path, sha256, output_dir):
+    
+    import bpy
+
+    # 清空当前场景的所有物体
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete(use_global=False)
+
+    # 导入 GLB 文件
+    bpy.ops.import_scene.gltf(filepath=os.path.expanduser(file_path))
+    # Create output folder for the specific model
+    output_folder = os.path.join(output_dir, 'renders', sha256)
+    os.makedirs(output_folder, exist_ok=True)
+    
+    ply_path = os.path.join(output_folder, 'mesh.ply')
+    # 导出为 PLY 格式
+    bpy.ops.export_scene.ply(filepath=ply_path)
+
+    return {'sha256': sha256, 'converted': True}
 
 if __name__ == '__main__':
     # Import dataset-specific utilities module based on the first argument
@@ -121,16 +181,16 @@ if __name__ == '__main__':
     metadata = metadata[start:end]
     records = []
 
-    # Skip objects that have already been converted
-    for sha256 in copy.copy(metadata['sha256'].values):
-        if os.path.exists(os.path.join(opt.output_dir, 'renders', sha256, 'mesh.ply')):
-            records.append({'sha256': sha256, 'converted': True})
-            metadata = metadata[metadata['sha256'] != sha256]
+    # # Skip objects that have already been converted
+    # for sha256 in copy.copy(metadata['sha256'].values):
+    #     if os.path.exists(os.path.join(opt.output_dir, 'renders', sha256, 'mesh.ply')):
+    #         records.append({'sha256': sha256, 'converted': True})
+    #         metadata = metadata[metadata['sha256'] != sha256]
                 
     print(f'Processing {len(metadata)} objects...')
 
     # Set up parallel conversion function with fixed parameters
-    func = partial(_convert_to_ply, output_dir=opt.output_dir)
+    func = partial(_convert_to_ply_blender, output_dir=opt.output_dir)
     
     # Process objects in parallel
     converted = dataset_utils.foreach_instance(metadata, opt.output_dir, func, 
