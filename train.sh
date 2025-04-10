@@ -47,3 +47,8 @@ python train.py \
   --data_dir /mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts \
   --load_dir /mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs2/ss_flow_img_dit_L_16l8_fp16_1node/ckpts \
   --ckpt 10000
+
+# visual ss_latent
+python visual_latent.py \
+    --config configs/generation/ss_flow_img_dit_L_16l8_fp16.json \
+    --data_dir /mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts

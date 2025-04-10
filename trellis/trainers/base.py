@@ -396,7 +396,7 @@ class Trainer:
         # sample: 
         # tensor with shape torch.Size([64, 8, 16, 16, 16])
         # sample
-        # image: 
+        # image:
         # image
         # tensor with shape torch.Size([64, 3, 518, 518])
         # Process the generated samples for visualization
