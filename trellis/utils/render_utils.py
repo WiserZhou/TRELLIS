@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 import utils3d
+import json
 
 from ..renderers import OctreeRenderer, GaussianRenderer, MeshRenderer
 from ..representations import Octree, Gaussian, MeshExtractResult
@@ -116,3 +117,34 @@ def render_snapshot(samples, resolution=512, bg_color=(0, 0, 0), offset=(-16 / 1
     pitch = [offset[1] for _ in range(4)]
     extrinsics, intrinsics = yaw_pitch_r_fov_to_extrinsics_intrinsics(yaw, pitch, r, fov)
     return render_frames(samples, extrinsics, intrinsics, {'resolution': resolution, 'bg_color': bg_color}, **kwargs)
+
+def get_part_bbox(part_name, bbox_file_path):
+    """
+    Retrieve bounding box information for a specified part name from a bbox_info.json file.
+    
+    Args:
+        part_name (str): Name of the part to search for (e.g., "body", "head", "left leg")
+        bbox_file_path (str): Path to the bbox_info.json file
+        
+    Returns:
+        dict: Bounding box information containing min, max, center and size for the part
+              Returns None if part is not found
+    """
+    import json
+    
+    # Load the bbox information from JSON file
+    with open(bbox_file_path, 'r') as f:
+        bbox_info = json.load(f)
+    
+    # Check if looking for the whole object
+    if part_name == "whole_object" and "whole_object" in bbox_info:
+        return bbox_info["whole_object"]
+    
+    # Search for the part in the parts list
+    if "parts" in bbox_info:
+        for part in bbox_info["parts"]:
+            if part["name"] == part_name:
+                return part
+    
+    # Part not found
+    return None

@@ -402,7 +402,7 @@ z_output/
 __pycache__
 *.zip
 *.log
-outputs/
+*outputs/
 pretrained/TRELLIS-image-large
 outputs2/
 *.pt

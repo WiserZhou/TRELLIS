@@ -49,6 +49,4 @@ python train.py \
   --ckpt 10000
 
 # visual ss_latent
-python visual_latent.py \
-    --config configs/generation/ss_flow_img_dit_L_16l8_fp16.json \
-    --data_dir /mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts
+python sparse_vae.py --input_path /mnt/pfs/users/yangyunhan/yufan/TRELLIS/datasets/Parts/voxels/a36a48897cc62006f0b49bc12d30cd38f28c83704feb203815365405247295ee.ply
