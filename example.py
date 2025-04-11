@@ -7,6 +7,7 @@ import argparse
 
 from trellis.pipelines import TrellisImageTo3DPipeline
 from process_utils import save_outputs, load_render_cond_info
+from PIL import Image
 
 def parse_args():
     parser = argparse.ArgumentParser(description="TRELLIS Image-to-3D Pipeline")
@@ -68,8 +69,8 @@ def main():
     # "slat_flow_model": "ckpts/slat_flow_img_dit_L_64l8p2_fp16"
 
     # pipeline.finetune_from_pretrained(model_name=args.finetune_component, path=args.finetune_path)
-    pipeline.finetune_from_pretrained_list([("sparse_structure_flow_model", "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/ss_flow_img_dit_L_16l8_fp16_1node_finetune/ckpts/denoiser_step0020000.pt"),
-        ("slat_flow_model", "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/slat_flow_img_dit_L_64l8p2_fp16_1node_finetune/ckpts/denoiser_step0020000.pt")])
+    pipeline.finetune_from_pretrained_list([("sparse_structure_flow_model", "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/ss_flow_img_dit_L_16l8_fp16_1node_finetune/ckpts/denoiser_step0010000.pt"),
+        ("slat_flow_model", "/mnt/pfs/users/yangyunhan/yufan/TRELLIS/outputs/slat_flow_img_dit_L_64l8p2_fp16_1node_finetune/ckpts/denoiser_step0010000.pt")])
 
     pipeline.cuda()
 
@@ -79,9 +80,10 @@ def main():
 
     # for i in range(num_images):
         # Run the pipeline
+    image = Image.open("/mnt/pfs/users/yangyunhan/yufan/TRELLIS/assets/example_image/typical_building_building.png")
     print(parts_info_list[:args.num_samples][0])
     outputs = pipeline.run(
-        parts_info_list[:args.num_samples][0],
+        image,
         seed=args.seed,
         # Optional parameters
         # sparse_structure_sampler_params={
