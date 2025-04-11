@@ -39,7 +39,7 @@ def parse_args():
                        help="Random seed")
     
     # Output settings
-    parser.add_argument("--output_prefix", type=str, default="finetune2_3_parts",
+    parser.add_argument("--output_prefix", type=str, default="finetune_3_parts",
                        help="Prefix for output filenames")
     parser.add_argument("--save_video", action="store_true", default=False,
                        help="Save video output")
